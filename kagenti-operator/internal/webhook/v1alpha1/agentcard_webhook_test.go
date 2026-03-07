@@ -175,11 +175,11 @@ func TestAgentCardValidator_ValidateCreate(t *testing.T) {
 }
 
 func TestAgentCardValidator_ValidateUpdate(t *testing.T) {
-	v := &AgentCardValidator{}
 	ctx := context.Background()
 	old := validAgentCard()
 
 	t.Run("with targetRef succeeds", func(t *testing.T) {
+		v := &AgentCardValidator{}
 		_, err := v.ValidateUpdate(ctx, old, validAgentCard())
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -187,6 +187,7 @@ func TestAgentCardValidator_ValidateUpdate(t *testing.T) {
 	})
 
 	t.Run("without targetRef returns error", func(t *testing.T) {
+		v := &AgentCardValidator{}
 		_, err := v.ValidateUpdate(ctx, old, &agentv1alpha1.AgentCard{
 			ObjectMeta: metav1.ObjectMeta{Name: "no-ref", Namespace: "default"},
 		})
@@ -195,6 +196,44 @@ func TestAgentCardValidator_ValidateUpdate(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "targetRef is required") {
 			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("update to duplicate targetRef is rejected", func(t *testing.T) {
+		existing := &agentv1alpha1.AgentCard{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "other-card",
+				Namespace: "default",
+			},
+			Spec: agentv1alpha1.AgentCardSpec{
+				TargetRef: &agentv1alpha1.TargetRef{
+					APIVersion: "apps/v1",
+					Kind:       "Deployment",
+					Name:       "taken-workload",
+				},
+			},
+		}
+		v := &AgentCardValidator{Reader: fakeReader(existing)}
+
+		updated := validAgentCard()
+		updated.Spec.TargetRef.Name = "taken-workload"
+
+		_, err := v.ValidateUpdate(ctx, old, updated)
+		if err == nil {
+			t.Fatal("expected error for duplicate targetRef on update")
+		}
+		if !strings.Contains(err.Error(), "an AgentCard already targets") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("update same card same targetRef succeeds", func(t *testing.T) {
+		self := validAgentCard()
+		v := &AgentCardValidator{Reader: fakeReader(self)}
+
+		_, err := v.ValidateUpdate(ctx, self, self)
+		if err != nil {
+			t.Errorf("unexpected error updating own targetRef: %v", err)
 		}
 	})
 }

@@ -73,7 +73,16 @@ func (v *AgentCardValidator) ValidateUpdate(ctx context.Context, oldObj, newObj 
 
 	agentcardlog.Info("validate update", "name", agentcard.Name)
 
-	return v.validateAgentCard(agentcard)
+	warnings, err := v.validateAgentCard(agentcard)
+	if err != nil {
+		return warnings, err
+	}
+
+	if err := v.checkDuplicateTargetRef(ctx, agentcard); err != nil {
+		return warnings, err
+	}
+
+	return warnings, nil
 }
 
 func (v *AgentCardValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
@@ -113,6 +122,7 @@ func (v *AgentCardValidator) checkDuplicateTargetRef(ctx context.Context, agentc
 	}
 
 	cardList := &agentv1alpha1.AgentCardList{}
+	// fail-open: allow creation if we can't verify uniqueness
 	if err := v.Reader.List(ctx, cardList, client.InNamespace(agentcard.Namespace)); err != nil {
 		agentcardlog.Error(err, "failed to list AgentCards for duplicate check")
 		return nil
@@ -120,6 +130,9 @@ func (v *AgentCardValidator) checkDuplicateTargetRef(ctx context.Context, agentc
 
 	for i := range cardList.Items {
 		existing := &cardList.Items[i]
+		if existing.Name == agentcard.Name {
+			continue
+		}
 		if existing.Spec.TargetRef != nil &&
 			existing.Spec.TargetRef.APIVersion == ref.APIVersion &&
 			existing.Spec.TargetRef.Kind == ref.Kind &&
