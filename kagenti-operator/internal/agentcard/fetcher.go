@@ -19,6 +19,7 @@ package agentcard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func (f *DefaultFetcher) fetchA2ACard(ctx context.Context, serviceURL string) (*
 		return card, nil
 	}
 
-	if !isNotFound(err) {
+	if !errors.Is(err, errNotFound) {
 		return nil, err
 	}
 
@@ -82,7 +83,9 @@ func (f *DefaultFetcher) fetchA2ACard(ctx context.Context, serviceURL string) (*
 		return nil, err
 	}
 
-	fetcherLogger.Info("WARNING: Agent card served from deprecated endpoint; migrate to "+A2AAgentCardPath,
+	fetcherLogger.Info("Agent card served from deprecated endpoint",
+		"deprecated", true,
+		"migrateTo", A2AAgentCardPath,
 		"legacyPath", A2ALegacyAgentCardPath,
 		"agentName", card.Name)
 
@@ -90,11 +93,7 @@ func (f *DefaultFetcher) fetchA2ACard(ctx context.Context, serviceURL string) (*
 }
 
 // errNotFound is returned when the agent card endpoint returns HTTP 404.
-var errNotFound = fmt.Errorf("agent card not found")
-
-func isNotFound(err error) bool {
-	return err != nil && err.Error() == errNotFound.Error()
-}
+var errNotFound = errors.New("agent card not found")
 
 func (f *DefaultFetcher) fetchAgentCardFromPath(ctx context.Context, serviceURL, path string) (*agentv1alpha1.AgentCardData, error) {
 	agentCardURL := serviceURL + path
