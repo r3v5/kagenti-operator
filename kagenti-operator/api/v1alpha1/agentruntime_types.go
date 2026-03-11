@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -63,15 +62,11 @@ type AgentRuntimeSpec struct {
 	Trace *TraceSpec `json:"trace,omitempty"`
 }
 
-// IdentitySpec configures workload identity and IdP registration for an AgentRuntime.
+// IdentitySpec configures workload identity for an AgentRuntime.
 type IdentitySpec struct {
 	// SPIFFE specifies SPIFFE identity configuration overrides
 	// +optional
 	SPIFFE *SPIFFEIdentity `json:"spiffe,omitempty"`
-
-	// ClientRegistration specifies IdP client registration configuration
-	// +optional
-	ClientRegistration *ClientRegistration `json:"clientRegistration,omitempty"`
 }
 
 // SPIFFEIdentity configures SPIFFE workload identity for an AgentRuntime.
@@ -81,20 +76,6 @@ type SPIFFEIdentity struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$`
 	TrustDomain string `json:"trustDomain,omitempty"`
-}
-
-// ClientRegistration configures IdP client registration for an AgentRuntime.
-type ClientRegistration struct {
-	// Provider is the IdP provider type (e.g., "keycloak")
-	// +kubebuilder:validation:MinLength=1
-	Provider string `json:"provider"`
-
-	// Realm is the IdP realm/tenant
-	// +kubebuilder:validation:MinLength=1
-	Realm string `json:"realm"`
-
-	// AdminCredentialsSecret references the Secret containing IdP admin credentials
-	AdminCredentialsSecret corev1.SecretReference `json:"adminCredentialsSecret"`
 }
 
 // TraceSpec configures observability for an AgentRuntime.
@@ -148,7 +129,7 @@ type AgentRuntime struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   AgentRuntimeSpec   `json:"spec,omitempty"`
+	Spec   AgentRuntimeSpec   `json:"spec"`
 	Status AgentRuntimeStatus `json:"status,omitempty"`
 }
 

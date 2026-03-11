@@ -348,7 +348,7 @@ For Deployments and StatefulSets to be automatically discovered by the operator,
 
 ## AgentRuntime
 
-The `AgentRuntime` Custom Resource configures identity (SPIFFE, IdP client registration) and observability (OTEL traces) for agent and tool workloads. Unlike AgentCard, which handles discovery and metadata fetching, AgentRuntime provides runtime configuration for workload identity and telemetry.
+The `AgentRuntime` Custom Resource configures identity (SPIFFE) and observability (OTEL traces) for agent and tool workloads. Unlike AgentCard, which handles discovery and metadata fetching, AgentRuntime provides runtime configuration for workload identity and telemetry.
 
 ### API Group and Version
 
@@ -362,7 +362,7 @@ The `AgentRuntime` Custom Resource configures identity (SPIFFE, IdP client regis
 AgentRuntime and AgentCard serve complementary purposes:
 
 - **AgentCard**: Fetches and stores agent metadata (capabilities, skills, endpoints) for dynamic discovery. Handles signature verification and identity binding validation.
-- **AgentRuntime**: Configures identity (SPIFFE trust domain, IdP client registration) and observability (OTEL trace endpoints, sampling) for running workloads.
+- **AgentRuntime**: Configures identity (SPIFFE trust domain) and observability (OTEL trace endpoints, sampling) for running workloads.
 
 Both resources use the shared `TargetRef` type to reference the backing workload (Deployment, StatefulSet, etc.).
 
@@ -377,26 +377,17 @@ Both resources use the shared `TargetRef` type to reference the backing workload
 
 #### IdentitySpec
 
-Configures workload identity and IdP registration for an AgentRuntime.
+Configures workload identity for an AgentRuntime.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `spiffe` | [SPIFFEIdentity](#spiffeidentity) | No | SPIFFE identity configuration overrides |
-| `clientRegistration` | [ClientRegistration](#clientregistration) | No | IdP client registration configuration |
 
 #### SPIFFEIdentity
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `trustDomain` | string | No | Overrides the operator-level `--spire-trust-domain` for this workload. If empty, the operator flag value is used. Must match pattern: `^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$` |
-
-#### ClientRegistration
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `provider` | string | Yes | IdP provider type (e.g., "keycloak") |
-| `realm` | string | Yes | IdP realm/tenant |
-| `adminCredentialsSecret` | SecretReference | Yes | References the Secret containing IdP admin credentials |
 
 #### TraceSpec
 
@@ -457,12 +448,6 @@ spec:
   identity:
     spiffe:
       trustDomain: custom.example.com
-    clientRegistration:
-      provider: keycloak
-      realm: agents
-      adminCredentialsSecret:
-        name: keycloak-admin-creds
-        namespace: default
   trace:
     endpoint: otel-collector.observability.svc.cluster.local:4317
     protocol: grpc

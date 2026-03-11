@@ -61,37 +61,6 @@ spec:
               identity:
                 description: Identity specifies optional per-workload identity overrides
                 properties:
-                  clientRegistration:
-                    description: ClientRegistration specifies IdP client registration
-                      configuration
-                    properties:
-                      adminCredentialsSecret:
-                        description: AdminCredentialsSecret references the Secret
-                          containing IdP admin credentials
-                        properties:
-                          name:
-                            description: name is unique within a namespace to reference
-                              a secret resource.
-                            type: string
-                          namespace:
-                            description: namespace defines the space within which
-                              the secret name must be unique.
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                      provider:
-                        description: Provider is the IdP provider type (e.g., "keycloak")
-                        minLength: 1
-                        type: string
-                      realm:
-                        description: Realm is the IdP realm/tenant
-                        minLength: 1
-                        type: string
-                    required:
-                    - adminCredentialsSecret
-                    - provider
-                    - realm
-                    type: object
                   spiffe:
                     description: SPIFFE specifies SPIFFE identity configuration overrides
                     properties:
@@ -231,6 +200,8 @@ spec:
                 - Error
                 type: string
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true
