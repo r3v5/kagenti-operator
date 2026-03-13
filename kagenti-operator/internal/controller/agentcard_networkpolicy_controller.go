@@ -183,7 +183,10 @@ func (r *AgentCardNetworkPolicyReconciler) upsertNetworkPolicy(ctx context.Conte
 	return r.Update(ctx, existingPolicy)
 }
 
-func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(ctx context.Context, policyName string, agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string) error {
+func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(
+	ctx context.Context, policyName string,
+	agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string,
+) error {
 	ingressRule := operatorIngressRule()
 	ingressRule.From = append(ingressRule.From, netv1.NetworkPolicyPeer{
 		PodSelector: &metav1.LabelSelector{

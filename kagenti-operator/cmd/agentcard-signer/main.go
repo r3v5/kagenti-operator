@@ -144,7 +144,10 @@ func writeConfigMap(ctx context.Context, signedCard []byte) error {
 	return writeConfigMapWithClient(ctx, clientset, agentName, namespace, signedCard)
 }
 
-func writeConfigMapWithClient(ctx context.Context, clientset k8sclient.Interface, agentName, namespace string, signedCard []byte) error {
+func writeConfigMapWithClient(
+	ctx context.Context, clientset k8sclient.Interface,
+	agentName, namespace string, signedCard []byte,
+) error {
 	cmName := agentName + "-card-signed"
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: namespace},

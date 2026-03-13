@@ -49,7 +49,8 @@ const (
 )
 
 type Fetcher interface {
-	Fetch(ctx context.Context, protocol string, serviceURL string, agentName string, namespace string) (*agentv1alpha1.AgentCardData, error)
+	Fetch(ctx context.Context, protocol, serviceURL, agentName, namespace string,
+	) (*agentv1alpha1.AgentCardData, error)
 }
 
 type DefaultFetcher struct {
@@ -64,7 +65,9 @@ func NewFetcher() Fetcher {
 	}
 }
 
-func (f *DefaultFetcher) Fetch(ctx context.Context, protocol string, serviceURL string, _ string, _ string) (*agentv1alpha1.AgentCardData, error) {
+func (f *DefaultFetcher) Fetch(
+	ctx context.Context, protocol, serviceURL, _, _ string,
+) (*agentv1alpha1.AgentCardData, error) {
 	switch protocol {
 	case A2AProtocol:
 		return f.fetchA2ACard(ctx, serviceURL)
@@ -165,7 +168,9 @@ func NewConfigMapFetcher(reader client.Reader) Fetcher {
 	}
 }
 
-func (f *ConfigMapFetcher) Fetch(ctx context.Context, protocol string, serviceURL string, agentName string, namespace string) (*agentv1alpha1.AgentCardData, error) {
+func (f *ConfigMapFetcher) Fetch(
+	ctx context.Context, protocol, serviceURL, agentName, namespace string,
+) (*agentv1alpha1.AgentCardData, error) {
 	if agentName != "" && namespace != "" {
 		cmName := agentName + SignedCardConfigMapSuffix
 		var cm corev1.ConfigMap

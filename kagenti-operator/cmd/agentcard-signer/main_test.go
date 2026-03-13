@@ -485,7 +485,8 @@ func TestWriteConfigMapWithClient_Create(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	cm, err := fakeClient.CoreV1().ConfigMaps("test-ns").Get(context.Background(), "my-agent-card-signed", metav1.GetOptions{})
+	cm, err := fakeClient.CoreV1().ConfigMaps("test-ns").
+		Get(context.Background(), "my-agent-card-signed", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("ConfigMap not created: %v", err)
 	}
@@ -507,7 +508,8 @@ func TestWriteConfigMapWithClient_Update(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	cm, _ := fakeClient.CoreV1().ConfigMaps("test-ns").Get(context.Background(), "my-agent-card-signed", metav1.GetOptions{})
+	cm, _ := fakeClient.CoreV1().ConfigMaps("test-ns").
+		Get(context.Background(), "my-agent-card-signed", metav1.GetOptions{})
 	if cm.Data["agent-card.json"] != string(newCardJSON) {
 		t.Errorf("ConfigMap not updated: got %q", cm.Data["agent-card.json"])
 	}
@@ -521,7 +523,7 @@ func TestWriteConfigMap_MissingEnvVars(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when env vars are missing")
 	}
-	if !testing.Verbose() {
-		// Just check it contains the expected message
+	if testing.Verbose() {
+		t.Logf("writeConfigMap error: %v", err)
 	}
 }
