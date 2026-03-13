@@ -42,21 +42,3 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "chart.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-
-
-{{- define "chart.hasMutatingWebhooks" -}}
-{{- $hasMutating := false }}
-{{- range . }}
-  {{- if eq .type "mutating" }}
-    $hasMutating = true }}{{- end }}
-{{- end }}
-{{ $hasMutating }}}}{{- end }}
-
-
-{{- define "chart.hasValidatingWebhooks" -}}
-{{- $hasValidating := false }}
-{{- range . }}
-  {{- if eq .type "validating" }}
-    $hasValidating = true }}{{- end }}
-{{- end }}
-{{ $hasValidating }}}}{{- end }}
