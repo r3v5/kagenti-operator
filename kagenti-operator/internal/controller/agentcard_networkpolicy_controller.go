@@ -21,15 +21,12 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -186,103 +183,46 @@ func (r *AgentCardNetworkPolicyReconciler) upsertNetworkPolicy(ctx context.Conte
 	return r.Update(ctx, existingPolicy)
 }
 
-func dnsEgressPorts() []netv1.NetworkPolicyPort {
-	return []netv1.NetworkPolicyPort{
-		{
-			Protocol: ptr.To(corev1.ProtocolUDP),
-			Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 53},
-		},
-		{
-			Protocol: ptr.To(corev1.ProtocolTCP),
-			Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 53},
-		},
-	}
-}
-
 func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(ctx context.Context, policyName string, agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string) error {
+	ingressRule := operatorIngressRule()
+	ingressRule.From = append(ingressRule.From, netv1.NetworkPolicyPeer{
+		PodSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{LabelSignatureVerified: "true"},
+		},
+	})
+
 	spec := netv1.NetworkPolicySpec{
 		PodSelector: metav1.LabelSelector{MatchLabels: podSelectorLabels},
 		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
-		Ingress: []netv1.NetworkPolicyIngressRule{
+		Ingress:     []netv1.NetworkPolicyIngressRule{ingressRule},
+		Egress:      []netv1.NetworkPolicyEgressRule{{}},
+	}
+	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
+}
+
+func operatorIngressRule() netv1.NetworkPolicyIngressRule {
+	return netv1.NetworkPolicyIngressRule{
+		From: []netv1.NetworkPolicyPeer{
 			{
-				From: []netv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{LabelSignatureVerified: "true"},
-						},
-					},
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
-						},
-					},
-				},
-			},
-		},
-		Egress: []netv1.NetworkPolicyEgressRule{
-			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{LabelSignatureVerified: "true"},
-						},
-					},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
 				},
 			},
 			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"},
-						},
-					},
-				},
-				Ports: dnsEgressPorts(),
-			},
-			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"kubernetes.io/metadata.name": "default"},
-						},
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"component": "apiserver"},
-						},
-					},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"name": "kagenti-system"},
 				},
 			},
 		},
 	}
-	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
 }
 
 func (r *AgentCardNetworkPolicyReconciler) createRestrictivePolicy(ctx context.Context, policyName string, agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string) error {
 	spec := netv1.NetworkPolicySpec{
 		PodSelector: metav1.LabelSelector{MatchLabels: podSelectorLabels},
 		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
-		Ingress: []netv1.NetworkPolicyIngressRule{
-			{
-				From: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
-						},
-					},
-				},
-			},
-		},
-		Egress: []netv1.NetworkPolicyEgressRule{
-			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"},
-						},
-					},
-				},
-				Ports: dnsEgressPorts(),
-			},
-		},
+		Ingress:     []netv1.NetworkPolicyIngressRule{operatorIngressRule()},
+		Egress:      []netv1.NetworkPolicyEgressRule{{}},
 	}
 	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
 }
