@@ -39,6 +39,7 @@ func newNPReconciler(enforce bool) *AgentCardNetworkPolicyReconciler {
 		Client:                 k8sClient,
 		Scheme:                 k8sClient.Scheme(),
 		EnforceNetworkPolicies: enforce,
+		KubeAPIServerCIDRs:     []string{"10.0.0.1/32", "10.0.0.2/32"},
 	}
 }
 
@@ -172,6 +173,11 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			Expect(p.Spec.Ingress[0].From).To(HaveLen(2))
 			Expect(p.Spec.Ingress[0].From[0].PodSelector).To(BeNil())
 			Expect(p.Spec.Egress).To(HaveLen(1))
+			Expect(p.Spec.Egress[0].To).To(HaveLen(2))
+			Expect(p.Spec.Egress[0].To[0].IPBlock.CIDR).To(Equal("10.0.0.1/32"))
+			Expect(p.Spec.Egress[0].To[1].IPBlock.CIDR).To(Equal("10.0.0.2/32"))
+			Expect(p.Spec.Egress[0].Ports).To(HaveLen(1))
+			Expect(p.Spec.Egress[0].Ports[0].Port.IntValue()).To(Equal(6443))
 		})
 
 		It("should restrict when ValidSignature=nil", func() {
@@ -185,6 +191,7 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			p := getPolicy(deploymentName, namespace)
 			Expect(p.Spec.Ingress).To(HaveLen(1))
 			Expect(p.Spec.Egress).To(HaveLen(1))
+			Expect(p.Spec.Egress[0].To).To(HaveLen(2))
 		})
 	})
 
