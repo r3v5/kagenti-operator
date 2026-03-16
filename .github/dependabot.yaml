@@ -10,3 +10,20 @@ updates:
     # we pin v1.64.8, so block major bumps until we migrate.
     - dependency-name: "golangci/golangci-lint-action"
       update-types: ["version-update:semver-major"]
+
+# Go modules
+- package-ecosystem: "gomod"
+  directory: "/kagenti-operator"
+  schedule:
+    interval: "weekly"
+
+# Docker base images
+- package-ecosystem: "docker"
+  directory: "/kagenti-operator"
+  schedule:
+    interval: "weekly"
+
+- package-ecosystem: "docker"
+  directory: "/kagenti-operator/cmd/agentcard-signer"
+  schedule:
+    interval: "weekly"
