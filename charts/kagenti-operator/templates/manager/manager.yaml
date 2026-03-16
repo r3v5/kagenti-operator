@@ -61,7 +61,7 @@ spec:
           command:
             - {{ .Values.controllerManager.container.cmd }}
           image: {{ .Values.controllerManager.container.image.repository }}:{{ .Values.controllerManager.container.image.tag }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
           {{- if .Values.controllerManager.container.env }}
           env:
             {{- range $key, $value := .Values.controllerManager.container.env }}

@@ -7,34 +7,31 @@
 # operator uses different flags.
 #
 
-set -eu
+set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-agents}"
 AGENTCARD="${AGENTCARD:-weather-agent-card}"
 DEPLOYMENT="${DEPLOYMENT:-weather-agent}"
 OPERATOR_NS="${OPERATOR_NS:-agentcard-system}"
 OPERATOR_DEPLOY="${OPERATOR_DEPLOY:-agentcard-operator}"
-SPIRE_TRUST_DOMAIN="${SPIRE_TRUST_DOMAIN:-demo.example.com}"
 
-OPERATOR_ARGS_BASE=(
-  "--leader-elect=false"
-  "--metrics-bind-address=0"
-  "--health-probe-bind-address=:8081"
-  "--require-a2a-signature=true"
-  "--spire-trust-domain=${SPIRE_TRUST_DOMAIN}"
-  "--spire-trust-bundle-configmap=spire-bundle"
-  "--spire-trust-bundle-configmap-namespace=spire-system"
-  "__GRACE__"
-  "--webhook-cert-path=/tmp/k8s-webhook-server/serving-certs"
-  "--enforce-network-policies=true"
-)
+# Capture the live operator args so we can restore them exactly after the demo.
+ORIGINAL_ARGS_JSON=$(kubectl get deployment "$OPERATOR_DEPLOY" -n "$OPERATOR_NS" \
+  -o jsonpath='{.spec.template.spec.containers[0].args}')
 
 patch_operator_grace() {
   local grace="$1"
-  local args_json
-  args_json=$(printf '%s\n' "${OPERATOR_ARGS_BASE[@]}" | sed "s/__GRACE__/--svid-expiry-grace-period=${grace}/" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip().split('\n')))")
+  local new_args
+  new_args=$(echo "$ORIGINAL_ARGS_JSON" | python3 -c "
+import sys, json, re
+args = json.loads(sys.stdin.read())
+patched = [re.sub(r'^--svid-expiry-grace-period=.*', '--svid-expiry-grace-period=${grace}', a) for a in args]
+if not any(a.startswith('--svid-expiry-grace-period=') for a in patched):
+    patched.append('--svid-expiry-grace-period=${grace}')
+print(json.dumps(patched))
+")
   kubectl patch deployment "$OPERATOR_DEPLOY" -n "$OPERATOR_NS" --type=json \
-    -p "[{\"op\": \"replace\", \"path\": \"/spec/template/spec/containers/0/args\", \"value\": ${args_json}}]"
+    -p "[{\"op\": \"replace\", \"path\": \"/spec/template/spec/containers/0/args\", \"value\": ${new_args}}]"
 }
 
 # ── Part A: Baseline ─────────────────────────────────────────────────────────
@@ -84,11 +81,15 @@ echo ""
 
 # ── Part D: Restore ──────────────────────────────────────────────────────────
 echo "=== Part D: Restore & Verify ==="
-echo "  Restoring --svid-expiry-grace-period=30m..."
-patch_operator_grace "30m"
+echo "  Restoring original operator args..."
+kubectl patch deployment "$OPERATOR_DEPLOY" -n "$OPERATOR_NS" --type=json \
+  -p "[{\"op\": \"replace\", \"path\": \"/spec/template/spec/containers/0/args\", \"value\": ${ORIGINAL_ARGS_JSON}}]"
 kubectl rollout status deployment/"$OPERATOR_DEPLOY" -n "$OPERATOR_NS" --timeout=120s
-echo "  Waiting 30s for stabilization..."
-sleep 30
+
+echo "  Waiting for weather-agent rollout to complete..."
+kubectl rollout status deployment/"$DEPLOYMENT" -n "$NAMESPACE" --timeout=180s
+echo "  Waiting 45s for operator reconciliation..."
+sleep 45
 
 echo ""
 echo "  AgentCard status after restart cycle:"

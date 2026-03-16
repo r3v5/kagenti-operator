@@ -39,6 +39,7 @@ func newNPReconciler(enforce bool) *AgentCardNetworkPolicyReconciler {
 		Client:                 k8sClient,
 		Scheme:                 k8sClient.Scheme(),
 		EnforceNetworkPolicies: enforce,
+		KubeAPIServerCIDRs:     []string{"10.0.0.1/32", "10.0.0.2/32"},
 	}
 }
 
@@ -141,7 +142,7 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			p := getPolicy(deploymentName, namespace)
 			Expect(p.Spec.PodSelector.MatchLabels).To(HaveKeyWithValue("app", deploymentName))
 			Expect(p.Spec.Ingress).To(HaveLen(1))
-			Expect(p.Spec.Ingress[0].From).To(HaveLen(2))
+			Expect(p.Spec.Ingress[0].From).To(HaveLen(3))
 			Expect(policyHasVerifiedPodIngress(p)).To(BeTrue())
 		})
 	})
@@ -169,9 +170,14 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 
 			p := getPolicy(deploymentName, namespace)
 			Expect(p.Spec.Ingress).To(HaveLen(1))
-			Expect(p.Spec.Ingress[0].From).To(HaveLen(1))
+			Expect(p.Spec.Ingress[0].From).To(HaveLen(2))
 			Expect(p.Spec.Ingress[0].From[0].PodSelector).To(BeNil())
 			Expect(p.Spec.Egress).To(HaveLen(1))
+			Expect(p.Spec.Egress[0].To).To(HaveLen(2))
+			Expect(p.Spec.Egress[0].To[0].IPBlock.CIDR).To(Equal("10.0.0.1/32"))
+			Expect(p.Spec.Egress[0].To[1].IPBlock.CIDR).To(Equal("10.0.0.2/32"))
+			Expect(p.Spec.Egress[0].Ports).To(HaveLen(1))
+			Expect(p.Spec.Egress[0].Ports[0].Port.IntValue()).To(Equal(6443))
 		})
 
 		It("should restrict when ValidSignature=nil", func() {
@@ -185,6 +191,7 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			p := getPolicy(deploymentName, namespace)
 			Expect(p.Spec.Ingress).To(HaveLen(1))
 			Expect(p.Spec.Egress).To(HaveLen(1))
+			Expect(p.Spec.Egress[0].To).To(HaveLen(2))
 		})
 	})
 
@@ -212,7 +219,7 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			reconcileNP(r, agentCardName, namespace)
 
 			p := getPolicy(deploymentName, namespace)
-			Expect(p.Spec.Ingress[0].From).To(HaveLen(2))
+			Expect(p.Spec.Ingress[0].From).To(HaveLen(3))
 			Expect(policyHasVerifiedPodIngress(p)).To(BeTrue())
 		})
 
@@ -250,7 +257,7 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			reconcileNP(r, agentCardName, namespace)
 			reconcileNP(r, agentCardName, namespace)
 
-			Expect(getPolicy(deploymentName, namespace).Spec.Ingress[0].From).To(HaveLen(2))
+			Expect(getPolicy(deploymentName, namespace).Spec.Ingress[0].From).To(HaveLen(3))
 
 			card := &agentv1alpha1.AgentCard{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: agentCardName, Namespace: namespace}, card)).To(Succeed())
@@ -260,7 +267,7 @@ var _ = Describe("AgentCardNetworkPolicyReconciler", func() {
 			reconcileNP(r, agentCardName, namespace)
 
 			p := getPolicy(deploymentName, namespace)
-			Expect(p.Spec.Ingress[0].From).To(HaveLen(1))
+			Expect(p.Spec.Ingress[0].From).To(HaveLen(2))
 			Expect(p.Spec.Ingress[0].From[0].PodSelector).To(BeNil())
 		})
 	})

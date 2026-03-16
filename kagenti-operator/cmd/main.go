@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -247,7 +248,7 @@ func main() {
 		Client:                mgr.GetClient(),
 		Scheme:                mgr.GetScheme(),
 		Recorder:              mgr.GetEventRecorderFor("agentcard-controller"),
-		AgentFetcher:          agentcard.NewFetcher(),
+		AgentFetcher:          agentcard.NewConfigMapFetcher(mgr.GetAPIReader()),
 		SignatureProvider:     sigProvider,
 		RequireSignature:      requireA2ASignature,
 		SignatureAuditMode:    signatureAuditMode,
@@ -259,11 +260,15 @@ func main() {
 	}
 
 	if enforceNetworkPolicies {
-		if err = (&controller.AgentCardNetworkPolicyReconciler{
+		npReconciler := &controller.AgentCardNetworkPolicyReconciler{
 			Client:                 mgr.GetClient(),
 			Scheme:                 mgr.GetScheme(),
 			EnforceNetworkPolicies: enforceNetworkPolicies,
-		}).SetupWithManager(mgr); err != nil {
+		}
+		npReconciler.DiscoverKubeAPIServerCIDRs(
+			context.Background(), mgr.GetAPIReader(),
+		)
+		if err = npReconciler.SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AgentCardNetworkPolicy")
 			os.Exit(1)
 		}
@@ -271,8 +276,9 @@ func main() {
 	}
 
 	if err = (&controller.AgentCardSyncReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		SpireTrustDomain: spireTrustDomain,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentCardSync")
 		os.Exit(1)

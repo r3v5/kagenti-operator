@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,6 +47,10 @@ type AgentCardNetworkPolicyReconciler struct {
 	client.Client
 	Scheme                 *runtime.Scheme
 	EnforceNetworkPolicies bool
+	// KubeAPIServerCIDRs are the /32 CIDRs of the K8s API server endpoints.
+	// Populated at startup from the "kubernetes" Endpoints in the default namespace.
+	// Used to allow init-container egress to the API server in restrictive policies.
+	KubeAPIServerCIDRs []string
 }
 
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -186,105 +189,84 @@ func (r *AgentCardNetworkPolicyReconciler) upsertNetworkPolicy(ctx context.Conte
 	return r.Update(ctx, existingPolicy)
 }
 
-func dnsEgressPorts() []netv1.NetworkPolicyPort {
-	return []netv1.NetworkPolicyPort{
-		{
-			Protocol: ptr.To(corev1.ProtocolUDP),
-			Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 53},
+func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(
+	ctx context.Context, policyName string,
+	agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string,
+) error {
+	ingressRule := operatorIngressRule()
+	ingressRule.From = append(ingressRule.From, netv1.NetworkPolicyPeer{
+		PodSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{LabelSignatureVerified: "true"},
 		},
-		{
-			Protocol: ptr.To(corev1.ProtocolTCP),
-			Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 53},
-		},
-	}
-}
+	})
 
-func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(ctx context.Context, policyName string, agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string) error {
 	spec := netv1.NetworkPolicySpec{
 		PodSelector: metav1.LabelSelector{MatchLabels: podSelectorLabels},
 		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
-		Ingress: []netv1.NetworkPolicyIngressRule{
-			{
-				From: []netv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{LabelSignatureVerified: "true"},
-						},
-					},
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
-						},
-					},
-				},
-			},
-		},
-		Egress: []netv1.NetworkPolicyEgressRule{
-			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{LabelSignatureVerified: "true"},
-						},
-					},
-				},
-			},
-			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"},
-						},
-					},
-				},
-				Ports: dnsEgressPorts(),
-			},
-			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"kubernetes.io/metadata.name": "default"},
-						},
-						PodSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"component": "apiserver"},
-						},
-					},
-				},
-			},
-		},
+		Ingress:     []netv1.NetworkPolicyIngressRule{ingressRule},
+		// Allow all egress for verified agents so they can reach external APIs and DNS.
+		Egress: []netv1.NetworkPolicyEgressRule{{}},
 	}
 	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
 }
 
-func (r *AgentCardNetworkPolicyReconciler) createRestrictivePolicy(ctx context.Context, policyName string, agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string) error {
-	spec := netv1.NetworkPolicySpec{
-		PodSelector: metav1.LabelSelector{MatchLabels: podSelectorLabels},
-		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
-		Ingress: []netv1.NetworkPolicyIngressRule{
+func operatorIngressRule() netv1.NetworkPolicyIngressRule {
+	return netv1.NetworkPolicyIngressRule{
+		From: []netv1.NetworkPolicyPeer{
 			{
-				From: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
-						},
-					},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
 				},
 			},
-		},
-		Egress: []netv1.NetworkPolicyEgressRule{
 			{
-				To: []netv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"},
-						},
-					},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"name": "kagenti-system"},
 				},
-				Ports: dnsEgressPorts(),
 			},
 		},
 	}
+}
+
+func (r *AgentCardNetworkPolicyReconciler) createRestrictivePolicy(
+	ctx context.Context, policyName string,
+	agentCard *agentv1alpha1.AgentCard,
+	podSelectorLabels map[string]string,
+) error {
+	spec := netv1.NetworkPolicySpec{
+		PodSelector: metav1.LabelSelector{MatchLabels: podSelectorLabels},
+		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
+		Ingress:     []netv1.NetworkPolicyIngressRule{operatorIngressRule()},
+		Egress:      r.kubeAPIEgressRules(),
+	}
 	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
+}
+
+// kubeAPIEgressRules returns egress rules that allow only traffic to the
+// K8s API server endpoints on port 6443. This permits init containers
+// (e.g. agentcard-signer) to write ConfigMaps while blocking all other
+// outbound traffic. If no API server CIDRs are configured, returns an
+// empty list (deny-all egress).
+func (r *AgentCardNetworkPolicyReconciler) kubeAPIEgressRules() []netv1.NetworkPolicyEgressRule {
+	if len(r.KubeAPIServerCIDRs) == 0 {
+		return []netv1.NetworkPolicyEgressRule{}
+	}
+
+	apiPort := intstr.FromInt32(6443)
+	tcp := corev1.ProtocolTCP
+	peers := make([]netv1.NetworkPolicyPeer, 0, len(r.KubeAPIServerCIDRs))
+	for _, cidr := range r.KubeAPIServerCIDRs {
+		peers = append(peers, netv1.NetworkPolicyPeer{
+			IPBlock: &netv1.IPBlock{CIDR: cidr},
+		})
+	}
+
+	return []netv1.NetworkPolicyEgressRule{{
+		Ports: []netv1.NetworkPolicyPort{{
+			Protocol: &tcp,
+			Port:     &apiPort,
+		}},
+		To: peers,
+	}}
 }
 
 func (r *AgentCardNetworkPolicyReconciler) handleDeletion(ctx context.Context, agentCard *agentv1alpha1.AgentCard) (ctrl.Result, error) {
@@ -345,6 +327,31 @@ func (r *AgentCardNetworkPolicyReconciler) handleDeletion(ctx context.Context, a
 
 func (r *AgentCardNetworkPolicyReconciler) mapWorkloadToAgentCard(apiVersion, kind string) handler.MapFunc {
 	return mapWorkloadToAgentCards(r.Client, apiVersion, kind, networkPolicyLogger)
+}
+
+// DiscoverKubeAPIServerCIDRs reads the "kubernetes" Endpoints in the
+// default namespace and populates KubeAPIServerCIDRs with /32 entries
+// for each API server address. Called once at startup.
+func (r *AgentCardNetworkPolicyReconciler) DiscoverKubeAPIServerCIDRs(
+	ctx context.Context, reader client.Reader,
+) {
+	ep := &corev1.Endpoints{}
+	key := types.NamespacedName{Name: "kubernetes", Namespace: "default"}
+	if err := reader.Get(ctx, key, ep); err != nil {
+		networkPolicyLogger.Error(err,
+			"Failed to read kubernetes Endpoints; "+
+				"restrictive policies will deny all egress")
+		return
+	}
+	var cidrs []string
+	for _, subset := range ep.Subsets {
+		for _, addr := range subset.Addresses {
+			cidrs = append(cidrs, addr.IP+"/32")
+		}
+	}
+	r.KubeAPIServerCIDRs = cidrs
+	networkPolicyLogger.Info("Discovered K8s API server endpoints",
+		"cidrs", cidrs)
 }
 
 func (r *AgentCardNetworkPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
