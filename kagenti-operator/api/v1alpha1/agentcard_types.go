@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -161,6 +162,18 @@ type AgentCardData struct {
 	// +optional
 	URL string `json:"url,omitempty"`
 
+	// DocumentationURL is a link to the agent's documentation
+	// +optional
+	DocumentationURL string `json:"documentationUrl,omitempty"`
+
+	// IconURL is a link to the agent's icon image
+	// +optional
+	IconURL string `json:"iconUrl,omitempty"`
+
+	// Provider describes the organization providing the agent
+	// +optional
+	Provider *AgentProvider `json:"provider,omitempty"`
+
 	// Capabilities specifies supported A2A features
 	// +optional
 	Capabilities *AgentCapabilities `json:"capabilities,omitempty"`
@@ -208,6 +221,36 @@ type SignatureHeader struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
+// AgentProvider describes the organization providing the agent
+type AgentProvider struct {
+	// Organization is the name of the provider organization
+	// +optional
+	Organization string `json:"organization,omitempty"`
+
+	// URL is the provider's website
+	// +optional
+	URL string `json:"url,omitempty"`
+}
+
+// AgentExtension describes an A2A protocol extension supported by the agent
+type AgentExtension struct {
+	// URI is the unique identifier for this extension
+	// +optional
+	URI string `json:"uri,omitempty"`
+
+	// Description explains what this extension does
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// Required indicates if this extension must be supported by the client
+	// +optional
+	Required *bool `json:"required,omitempty"`
+
+	// Params contains extension-specific configuration
+	// +optional
+	Params map[string]apiextensionsv1.JSON `json:"params,omitempty"`
+}
+
 // AgentCapabilities defines A2A feature support
 type AgentCapabilities struct {
 	// Streaming indicates if the agent supports streaming responses
@@ -217,6 +260,10 @@ type AgentCapabilities struct {
 	// PushNotifications indicates if the agent supports push notifications
 	// +optional
 	PushNotifications *bool `json:"pushNotifications,omitempty"`
+
+	// Extensions lists A2A protocol extensions supported by the agent
+	// +optional
+	Extensions []AgentExtension `json:"extensions,omitempty"`
 }
 
 // AgentSkill represents a skill offered by the agent

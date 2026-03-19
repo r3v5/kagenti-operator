@@ -155,6 +155,31 @@ spec:
                   capabilities:
                     description: Capabilities specifies supported A2A features
                     properties:
+                      extensions:
+                        description: Extensions lists A2A protocol extensions supported
+                          by the agent
+                        items:
+                          description: AgentExtension describes an A2A protocol extension
+                            supported by the agent
+                          properties:
+                            description:
+                              description: Description explains what this extension
+                                does
+                              type: string
+                            params:
+                              additionalProperties:
+                                x-kubernetes-preserve-unknown-fields: true
+                              description: Params contains extension-specific configuration
+                              type: object
+                            required:
+                              description: Required indicates if this extension must
+                                be supported by the client
+                              type: boolean
+                            uri:
+                              description: URI is the unique identifier for this extension
+                              type: string
+                          type: object
+                        type: array
                       pushNotifications:
                         description: PushNotifications indicates if the agent supports
                           push notifications
@@ -180,9 +205,26 @@ spec:
                     description: Description provides information about what the agent
                       does
                     type: string
+                  documentationUrl:
+                    description: DocumentationURL is a link to the agent's documentation
+                    type: string
+                  iconUrl:
+                    description: IconURL is a link to the agent's icon image
+                    type: string
                   name:
                     description: Name is the human-readable name of the agent
                     type: string
+                  provider:
+                    description: Provider describes the organization providing the
+                      agent
+                    properties:
+                      organization:
+                        description: Organization is the name of the provider organization
+                        type: string
+                      url:
+                        description: URL is the provider's website
+                        type: string
+                    type: object
                   signatures:
                     description: Signatures contains JWS signatures per A2A spec §8.4.2.
                     items:
