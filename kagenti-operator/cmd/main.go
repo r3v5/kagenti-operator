@@ -26,12 +26,15 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -194,6 +197,35 @@ func main() {
 		Metrics: metricsServerOptions,
 		Cache: cache.Options{
 			DefaultNamespaces: getNamespacesToWatch(),
+			// Scope the ConfigMap informer to only kagenti-relevant ConfigMaps.
+			// Without this, the controller would cache ALL ConfigMaps cluster-wide.
+			//
+			// Two types of ConfigMaps are relevant:
+			// 1. Cluster-level defaults in kagenti-webhook-system:
+			//    - kagenti-webhook-defaults (platform-wide sidecar config)
+			//    - kagenti-webhook-feature-gates (which AuthBridge components are enabled)
+			//    Both are deployed by the kagenti-webhook Helm chart and share the
+			//    label app.kubernetes.io/name=kagenti-webhook.
+			//
+			// 2. Namespace-level defaults in agent namespaces:
+			//    ConfigMaps labeled kagenti.io/defaults=true, deployed by platform
+			//    engineers via Helm/Kustomize to override cluster defaults per namespace.
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.ConfigMap{}: {
+					Namespaces: map[string]cache.Config{
+						controller.ClusterDefaultsNamespace: {
+							LabelSelector: labels.SelectorFromSet(map[string]string{
+								"app.kubernetes.io/name": "kagenti-webhook",
+							}),
+						},
+						cache.AllNamespaces: {
+							LabelSelector: labels.SelectorFromSet(map[string]string{
+								controller.LabelNamespaceDefaults: "true",
+							}),
+						},
+					},
+				},
+			},
 		},
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
@@ -281,6 +313,15 @@ func main() {
 		SpireTrustDomain: spireTrustDomain,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentCardSync")
+		os.Exit(1)
+	}
+
+	if err = (&controller.AgentRuntimeReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("agentruntime-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "AgentRuntime")
 		os.Exit(1)
 	}
 

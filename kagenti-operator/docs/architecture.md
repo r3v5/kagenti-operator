@@ -39,10 +39,12 @@ The Kagenti Operator is a Kubernetes controller that implements the [Operator Pa
 - Stores agent capabilities, skills, and endpoint information
 
 #### AgentRuntime CRD
-- Configures identity (SPIFFE) and observability (OTEL traces) for agent/tool workloads
+- The declarative way to enroll a workload into the Kagenti platform
+- Developer creates an AgentRuntime CR with `targetRef` — the controller applies labels and triggers injection
+- Configures identity (SPIFFE) and observability (OTEL traces) per workload via 3-layer defaults (cluster → namespace → CR)
 - Uses `targetRef` to reference backing workloads (Deployment, StatefulSet)
-- Provides per-workload overrides for trust domain, trace endpoints, and sampling rates
-- Complements AgentCard by handling runtime configuration rather than metadata discovery
+- The `kagenti.io/type` label applied by the controller triggers the webhook's `objectSelector`
+- Developer workloads stay completely clean — no kagenti labels required in manifests
 
 ### Controllers
 
@@ -63,6 +65,14 @@ The Kagenti Operator is a Kubernetes controller that implements the [Operator Pa
 - Creates **permissive** NetworkPolicies for agents with verified signatures (and binding, if configured)
 - Creates **restrictive** NetworkPolicies for agents that fail verification
 - Resolves pod selectors from the backing workload's pod template labels
+
+#### AgentRuntime Controller
+- Watches AgentRuntime CRs, Deployments, StatefulSets, and ConfigMaps
+- Applies `kagenti.io/type` label and `kagenti.io/config-hash` annotation to target workloads
+- Computes config hash from 3-layer merged configuration (cluster defaults → namespace defaults → CR overrides)
+- Triggers rolling updates when configuration changes (any layer)
+- On CR deletion: preserves type label, updates config-hash to defaults-only, removes managed-by label
+- Coordinates with the kagenti-extensions webhook which injects sidecars at Pod CREATE time
 
 ### Supporting Components
 
@@ -91,9 +101,20 @@ graph TB
         Webhook[Admission Webhook]
         CardController[AgentCard Controller]
         SyncController[AgentCardSync Controller]
+        RuntimeController[AgentRuntime Controller]
         CardCR -->|Validates| Webhook
 
         Webhook -->|Valid CR| CardController
+    end
+
+    subgraph "Config Sources"
+        ClusterCM[Cluster Defaults ConfigMaps]
+        NsCM[Namespace Defaults ConfigMap]
+        TrustBundle[SPIRE Trust Bundle ConfigMap]
+    end
+
+    subgraph "Kagenti Webhook Pod"
+        InjectionWebhook[Mutating Webhook]
     end
 
     subgraph "Runtime"
@@ -101,12 +122,16 @@ graph TB
 
         Deployment -->|Creates| Pod
         CardController -->|Fetches agent card from| Pod
+        InjectionWebhook -->|Injects sidecars at CREATE| Pod
     end
 
-    subgraph "Trust Sources"
-        TrustBundle[SPIRE Trust Bundle ConfigMap]
-        SigProvider -->|Validates x5c chain| TrustBundle
-    end
+    SigProvider -->|Validates x5c chain| TrustBundle
+
+    RuntimeController -->|Applies labels + config-hash| Deployment
+    RuntimeController -->|Reads defaults| ClusterCM
+    RuntimeController -->|Reads defaults| NsCM
+    RuntimeController -->|Watches| RuntimeCR
+    InjectionWebhook -->|Reads config| ClusterCM
 
     SyncController -->|Watches| Deployment
     SyncController -->|Auto-creates| CardCR
@@ -159,6 +184,76 @@ The controller maintains several conditions:
 Examples:
 - Deployment `weather-agent` -> AgentCard `weather-agent-deployment-card`
 - StatefulSet `weather-agent` -> AgentCard `weather-agent-statefulset-card`
+
+### AgentRuntime Controller
+
+The AgentRuntime Controller reconciles AgentRuntime CRs by resolving the target workload, computing a config hash from the 3-layer merged configuration, and applying labels and annotations to trigger rolling updates and webhook injection.
+
+#### Reconciliation Flow
+
+```
+1. Fetch AgentRuntime CR
+2. Handle deletion (if marked for deletion):
+   a. Preserve kagenti.io/type label on workload
+   b. Update config-hash to defaults-only (triggers rollback)
+   c. Remove managed-by label
+   d. Remove finalizer
+3. Ensure kagenti.io/cleanup finalizer is present
+4. Resolve targetRef (verify Deployment/StatefulSet exists)
+5. Compute config hash from merged configuration:
+   a. Read cluster defaults (kagenti-webhook-defaults)
+   b. Read cluster feature gates (kagenti-webhook-feature-gates)
+      Note: feature gates are platform-wide policy — they are NOT
+      overrideable by namespace defaults or AgentRuntime CRs.
+   c. Read namespace defaults (ConfigMap with kagenti.io/defaults=true)
+   d. Merge defaults: cluster → namespace → CR spec (CR wins)
+   e. Hash the merged result (deterministic SHA256)
+   f. Surface warnings (e.g., multiple namespace defaults ConfigMaps)
+      as a ConfigResolved condition on the AgentRuntime status
+6. Apply to target workload:
+   a. kagenti.io/type label on workload metadata + PodTemplateSpec
+   b. app.kubernetes.io/managed-by: kagenti-operator on workload metadata
+   c. kagenti.io/config-hash annotation on PodTemplateSpec
+7. Count configured pods and update status
+```
+
+#### Controller ↔ Webhook Interaction
+
+The controller and the kagenti-extensions mutating webhook work together:
+
+```
+AgentRuntime CR created/updated
+  → Controller applies kagenti.io/type label + config-hash annotation
+    → PodTemplateSpec change triggers Kubernetes rolling update
+      → New Pods created with kagenti.io/type label
+        → Webhook's objectSelector matches → injects AuthBridge sidecars
+```
+
+| Concern | Controller | Webhook |
+|---------|-----------|---------|
+| Detect config change | Yes (3-layer merge + hash) | No |
+| Trigger pod restart | Yes (annotation on PodTemplateSpec) | No |
+| Read ConfigMap data | Yes (for hash computation) | Yes (for sidecar configuration) |
+| Merge config values | Yes (same 3-layer merge) | Yes (independently) |
+| Mutate pod spec | No | Yes (sidecar injection) |
+
+#### Watches
+
+| Resource | Scope | Purpose |
+|----------|-------|---------|
+| AgentRuntime | All namespaces | Primary resource |
+| Deployment | All namespaces | Re-reconcile if target workload modified externally |
+| StatefulSet | All namespaces | Re-reconcile if target workload modified externally |
+| ConfigMap (cluster) | `kagenti-webhook-system` | Recompute hash when cluster defaults change |
+| ConfigMap (namespace) | `kagenti.io/defaults=true` | Recompute hash when namespace defaults change |
+
+#### Conditions
+
+| Condition | Meaning |
+|-----------|---------|
+| `TargetResolved` | Target workload (Deployment/StatefulSet) exists |
+| `ConfigResolved` | Configuration merged successfully. Reason is `ConfigResolved` when clean, `ConfigWarning` when ambiguity detected (e.g., multiple namespace defaults ConfigMaps). Warnings are surfaced in the condition message and as Kubernetes events. |
+| `Ready` | Labels and config-hash applied successfully |
 
 ### NetworkPolicy Controller
 
@@ -219,10 +314,11 @@ When `spec.identityBinding` is configured on an AgentCard:
 The operator implements least-privilege access control:
 
 #### Operator Permissions
-- Read/Write: AgentCard CRs
-- Read: Deployments, StatefulSets, Services, Pods
-- Read: ConfigMaps, Secrets
-- Create: Events
+- Read/Write: AgentCard CRs, AgentRuntime CRs
+- Read/Update/Patch: Deployments, StatefulSets (for label/annotation application)
+- Read: Services, Pods
+- Read: ConfigMaps (cluster defaults + namespace defaults)
+- Create/Patch: Events
 
 ### Secret Management
 
@@ -323,6 +419,7 @@ rules:
 |-----------|------------------|
 | Operator | Single replica (leader election optional) |
 | Agents | Horizontal scaling via replicas field |
+| AgentRuntimes | One per agent/tool workload |
 | AgentCards | One per agent workload |
 | NetworkPolicies | One per AgentCard (when enforcement enabled) |
 

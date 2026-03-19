@@ -16,6 +16,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - pods
   verbs:
   - get
@@ -27,6 +34,7 @@ rules:
   - agent.kagenti.dev
   resources:
   - agentcards
+  - agentruntimes
   verbs:
   - create
   - delete
@@ -39,12 +47,14 @@ rules:
   - agent.kagenti.dev
   resources:
   - agentcards/finalizers
+  - agentruntimes/finalizers
   verbs:
   - update
 - apiGroups:
   - agent.kagenti.dev
   resources:
   - agentcards/status
+  - agentruntimes/status
   verbs:
   - get
   - patch

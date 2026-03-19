@@ -366,6 +366,16 @@ AgentRuntime and AgentCard serve complementary purposes:
 
 Both resources use the shared `TargetRef` type to reference the backing workload (Deployment, StatefulSet, etc.).
 
+### Configuration Precedence
+
+The controller merges configuration from three layers (highest priority wins):
+
+1. **AgentRuntime CR spec** — per-workload overrides (trust domain, trace endpoint, etc.)
+2. **Namespace defaults** — ConfigMap with `kagenti.io/defaults=true` label in the workload's namespace
+3. **Cluster defaults** — `kagenti-webhook-defaults` ConfigMap in `kagenti-webhook-system`
+
+> **Note:** Feature gates (`kagenti-webhook-feature-gates`) are platform-wide policy and are **not** overrideable by namespace defaults or AgentRuntime CRs. They control which AuthBridge components (envoy proxy, SPIFFE helper, client registration) are enabled globally.
+
 ### Spec Fields
 
 | Field | Type | Required | Description |
@@ -412,6 +422,18 @@ Configures observability for an AgentRuntime.
 | `phase` | string | High-level state of the AgentRuntime (`Pending`, `Active`, or `Error`) |
 | `configuredPods` | int32 | Count of pods with expected labels/configuration |
 | `conditions` | [][Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#condition-v1-meta) | Current state of the AgentRuntime |
+
+#### Conditions
+
+| Condition | Status | Reason | Description |
+|-----------|--------|--------|-------------|
+| `TargetResolved` | True | `TargetFound` | Target Deployment/StatefulSet exists |
+| `TargetResolved` | False | `TargetNotFound` | Target workload not found; controller requeues after 30s |
+| `ConfigResolved` | True | `ConfigResolved` | Configuration merged successfully from all layers |
+| `ConfigResolved` | True | `ConfigWarning` | Configuration merged but ambiguity detected (e.g., multiple namespace defaults ConfigMaps with `kagenti.io/defaults=true`). The warning is surfaced in the condition message and as a Kubernetes event. |
+| `Ready` | True | `Configured` | Labels and config-hash applied to the target workload |
+| `Ready` | False | `ConfigHashError` | Failed to compute the config hash |
+| `Ready` | False | `ConfigApplyError` | Failed to apply labels/annotations to the workload |
 
 ### Examples
 
