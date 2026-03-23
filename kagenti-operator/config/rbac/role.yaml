@@ -99,6 +99,12 @@ rules:
   - list
   - watch
 - apiGroups:
+  - apps
+  resources:
+  - deployments/finalizers
+  verbs:
+  - update
+- apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies
