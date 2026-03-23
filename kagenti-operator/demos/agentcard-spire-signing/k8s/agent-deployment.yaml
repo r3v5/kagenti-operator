@@ -82,9 +82,9 @@ spec:
       serviceAccountName: weather-agent-sa
       initContainers:
         - name: sign-agentcard
-          # Local/Kind: kagenti/agentcard-signer:latest (make build-signer && make load-signer-image)
-          # Remote:     push to a registry accessible by your cluster (e.g. ttl.sh, ghcr.io)
-          image: kagenti/agentcard-signer:latest
+          # Local/Kind: make build-signer && make load-signer-image
+          # Override:   set image to a custom registry if needed (e.g. ttl.sh for dev)
+          image: ghcr.io/kagenti/kagenti-operator/agentcard-signer:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: SPIFFE_ENDPOINT_SOCKET

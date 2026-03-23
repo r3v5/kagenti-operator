@@ -16,8 +16,25 @@ builds:
   env:
   - CGO_ENABLED=0
 
+- id: "agentcard-signer"
+  dir: kagenti-operator
+  main: ./cmd/agentcard-signer
+  binary: ./bin/agentcard-signer
+  goos:
+  - linux
+  goarch:
+  - amd64
+  - arm64
+  env:
+  - CGO_ENABLED=0
+
 archives:
-- ids: [kagenti-operator]
+- id: kagenti-operator-archive
+  ids: [kagenti-operator]
+  name_template: "kagenti-operator_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+- id: agentcard-signer-archive
+  ids: [agentcard-signer]
+  name_template: "agentcard-signer_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 kos:
   - id: "kagenti-operator-ko"
@@ -36,6 +53,24 @@ kos:
       - linux/arm64
     env:
       - CGO_ENABLED=0
+
+  - id: "agentcard-signer-ko"
+    repositories:
+    - ghcr.io/kagenti/kagenti-operator/agentcard-signer
+    working_dir: kagenti-operator
+    main: ./cmd/agentcard-signer
+    build: agentcard-signer
+    tags:
+      - '{{.Version}}'
+      - latest
+    bare: true
+    preserve_import_paths: false
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    env:
+      - CGO_ENABLED=0
+
 release:
   draft: false
   prerelease: auto

@@ -150,7 +150,7 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
-SIGNER_IMG ?= kagenti/agentcard-signer:latest
+SIGNER_IMG ?= ghcr.io/kagenti/kagenti-operator/agentcard-signer:latest
 KIND_CLUSTER_NAME ?= $(CLUSTER)
 
 .PHONY: build-signer

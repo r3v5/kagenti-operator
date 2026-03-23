@@ -60,6 +60,25 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
+    - name: Extract Docker metadata (agentcard-signer)
+      id: signer-meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ghcr.io/${{ github.repository }}/agentcard-signer
+        tags: |
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest
+
+    - name: Build and push agentcard-signer
+      uses: docker/build-push-action@v7
+      with:
+        context: ./kagenti-operator
+        file: ./kagenti-operator/cmd/agentcard-signer/Dockerfile
+        push: true
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ steps.signer-meta.outputs.tags }}
+        labels: ${{ steps.signer-meta.outputs.labels }}
+
   # Full release with GoReleaser (only on version tags)
   goreleaser:
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
