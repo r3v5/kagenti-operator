@@ -450,7 +450,7 @@ Configures observability for an AgentRuntime.
 A validating webhook prevents ownership conflicts:
 
 - **Duplicate targetRef rejection**: If an AgentRuntime CR already targets a given workload (same `apiVersion` + `kind` + `name`) in the same namespace, creating or updating another AgentRuntime to target the same workload is rejected at admission time.
-- **Fail-open**: If the webhook cannot list existing AgentRuntimes (e.g., API server error), creation is allowed to avoid blocking deployments.
+- **Fail-open on API errors**: If the webhook's internal list call fails (e.g., transient API server error), the request is allowed through to avoid blocking deployments. Note: the Kubernetes-level `failurePolicy` is set to `Fail`, so if the webhook pod itself is unreachable, the API server will reject AgentRuntime creates/updates. This is consistent with the AgentCard webhook.
 
 This prevents conflicting label updates where two AgentRuntime CRs with different `type` values (e.g., `agent` vs `tool`) would fight over the same workload's `kagenti.io/type` label.
 
