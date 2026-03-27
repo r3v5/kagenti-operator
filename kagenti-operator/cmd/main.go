@@ -44,6 +44,7 @@ import (
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
 	"github.com/kagenti/operator/internal/agentcard"
 	"github.com/kagenti/operator/internal/controller"
+	"github.com/kagenti/operator/internal/keycloak"
 	"github.com/kagenti/operator/internal/signature"
 	"github.com/kagenti/operator/internal/tekton"
 	webhookv1alpha1 "github.com/kagenti/operator/internal/webhook/v1alpha1"
@@ -108,7 +109,7 @@ func main() {
 		"When true, log signature verification failures but don't block (use for rollout)")
 	flag.BoolVar(&enforceNetworkPolicies, "enforce-network-policies", false,
 		"Create NetworkPolicies to restrict traffic for agents with unverified signatures")
-	flag.BoolVar(&enableOperatorClientRegistration, "enable-operator-client-registration", true,
+	flag.BoolVar(&enableOperatorClientRegistration, "enable-operator-client-registration", false,
 		"Reconcile Keycloak client registration for workloads with kagenti.io/client-registration-inject=false")
 
 	flag.StringVar(&spireTrustDomain, "spire-trust-domain", "",
@@ -330,10 +331,11 @@ func main() {
 
 	if enableOperatorClientRegistration {
 		if err = (&controller.ClientRegistrationReconciler{
-			Client:           mgr.GetClient(),
-			APIReader:        mgr.GetAPIReader(),
-			Scheme:           mgr.GetScheme(),
-			SpireTrustDomain: spireTrustDomain,
+			Client:                  mgr.GetClient(),
+			APIReader:               mgr.GetAPIReader(),
+			Scheme:                  mgr.GetScheme(),
+			SpireTrustDomain:        spireTrustDomain,
+			KeycloakAdminTokenCache: &keycloak.CachedAdminTokenProvider{},
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "ClientRegistration")
 			os.Exit(1)

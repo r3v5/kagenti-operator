@@ -60,6 +60,9 @@ type ClientRegistrationReconciler struct {
 	Scheme    *runtime.Scheme
 
 	SpireTrustDomain string
+	// KeycloakAdminTokenCache caches admin password-grant tokens by Keycloak URL and credentials to
+	// avoid a token request on every reconcile. If nil, PasswordGrantToken is used without caching.
+	KeycloakAdminTokenCache *keycloak.CachedAdminTokenProvider
 }
 
 func (r *ClientRegistrationReconciler) uncachedReader() client.Reader {
@@ -121,7 +124,7 @@ func (r *ClientRegistrationReconciler) Reconcile(ctx context.Context, req ctrl.R
 				if err := r.Get(ctx, req.NamespacedName, s); err != nil {
 					return err
 				}
-					if !injectKeycloakClientCredentialsAnnotation(&s.Spec.Template, keycloakClientCredentialsSecretName(s.Namespace, s.Name)) {
+				if !injectKeycloakClientCredentialsAnnotation(&s.Spec.Template, keycloakClientCredentialsSecretName(s.Namespace, s.Name)) {
 					return nil
 				}
 				return r.Update(ctx, s)
@@ -190,7 +193,12 @@ func (r *ClientRegistrationReconciler) reconcileOne(
 	audienceScopeOn := strings.TrimSpace(ab.KeycloakAudienceScopeEnabled) != "false"
 
 	kc := keycloak.Admin{BaseURL: ab.KeycloakURL, HTTPClient: keycloak.DefaultHTTPClient()}
-	token, err := kc.PasswordGrantToken(ctx, adminUser, adminPass)
+	var token string
+	if r.KeycloakAdminTokenCache != nil {
+		token, err = r.KeycloakAdminTokenCache.Token(ctx, &kc, adminUser, adminPass)
+	} else {
+		token, err = kc.PasswordGrantToken(ctx, adminUser, adminPass)
+	}
 	if err != nil {
 		logger.Error(err, "Keycloak admin token failed")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -341,6 +349,8 @@ func readClusterFeatureGates(ctx context.Context, c client.Reader) (globalOn, cl
 	if cm.Data == nil {
 		return globalOn, clientReg, injectTools, nil
 	}
+	// Only one ConfigMap data entry is consulted: we return after the first non-empty
+	// value that unmarshals to a non-empty YAML map (map iteration order); other keys are ignored.
 	for _, raw := range cm.Data {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
