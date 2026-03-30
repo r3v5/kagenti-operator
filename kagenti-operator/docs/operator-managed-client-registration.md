@@ -19,13 +19,15 @@ Some deployments want **Envoy / SPIFFE / AuthBridge** injection to stay **pod-lo
 
 ### 1.2 Approach
 
-Workloads **opt out** of webhook-injected client registration with a well-known label. The **operator** then:
+**By default**, agent and tool workloads use **operator-managed** Keycloak registration: the webhook does **not** inject the legacy **`kagenti-client-registration`** sidecar (and disables the registration slice in combined **authbridge**). The **operator** then:
 
 1. Registers the workload as a Keycloak client using the **Keycloak admin API** (same conceptual contract as the sidecar).
 2. Creates a **Secret** in the workload namespace with `client-id.txt` and `client-secret.txt`.
 3. Annotates the pod template so the **webhook** can mount that Secret into every container that already uses the **`shared-data`** volume, at the **same paths** the sidecar used (`/shared/client-id.txt`, `/shared/client-secret.txt`).
 
-The webhook continues to inject **proxy-init**, **envoy** / **authbridge**, and **spiffe-helper** according to existing precedence and feature gates; it only skips the **client-registration** sidecar (or the registration portion of combined authbridge) when the label opts out.
+Workloads that need the **legacy** in-pod registration path **opt in** with `kagenti.io/client-registration-inject: "true"`; the operator skips those workloads.
+
+The webhook continues to inject **proxy-init**, **envoy** / **authbridge**, and **spiffe-helper** according to existing precedence and feature gates.
 
 ### 1.3 Benefits
 
@@ -43,7 +45,8 @@ The webhook continues to inject **proxy-init**, **envoy** / **authbridge**, and 
 
 | Key | Value | Meaning |
 |-----|--------|---------|
-| `kagenti.io/client-registration-inject` | `"false"` | Workload opts **out** of webhook-injected client registration; operator is expected to manage registration **if** other conditions hold. |
+| `kagenti.io/client-registration-inject` | absent, `"false"`, or any value other than `"true"` | **Default**: operator-managed registration; webhook does **not** inject the legacy client-registration sidecar / combined registration slice. |
+| `kagenti.io/client-registration-inject` | `"true"` | **Legacy**: webhook injects the client-registration sidecar (or enables registration in combined authbridge); operator **does not** manage registration for this workload. |
 | `kagenti.io/keycloak-client-credentials-secret-name` | Secret name | Set by the operator on the **pod template**; webhook reads it from **Pod** annotations at admission time and mounts the Secret. |
 
 The string values for the label key and the annotation key are **duplicated** in both repos and must stay in sync:
@@ -55,14 +58,14 @@ The string values for the label key and the annotation key are **duplicated** in
 
 The **ClientRegistration** controller watches **Deployments** and **StatefulSets** whose pod template labels satisfy:
 
-- `kagenti.io/client-registration-inject` is **exactly** `"false"`.
+- `kagenti.io/client-registration-inject` is **not** `"true"` (legacy sidecar opt-in disables the operator for that workload).
 - `kagenti.io/type` is **`agent`**, or **`tool`** when the cluster feature gate **`injectTools`** is true (tools are skipped if `injectTools` is false).
 
 Other workloads are ignored by this controller.
 
 ### 2.3 Webhook behavior
 
-1. **Precedence** (unchanged): `kagenti.io/client-registration-inject=false` disables injection of the client-registration sidecar / registration slice in combined authbridge (`precedence.go`).
+1. **Precedence**: `kagenti.io/client-registration-inject=true` **enables** injection of the client-registration sidecar / registration slice in combined authbridge; otherwise that path is off (`precedence.go`).
 2. **After** sidecars and volumes are applied, **`ApplyKeycloakClientCredentialsSecretVolumes`** runs for **every** mutation:
    - If the pod (template) annotation `kagenti.io/keycloak-client-credentials-secret-name` is set, the webhook adds a **Secret volume** named like the Secret (`kagenti-keycloak-client-credentials-<uniq-id>`) and **subPath mounts** for `client-id.txt` and `client-secret.txt` into **each container that already has a `shared-data` volume mount**.
 3. **Reinvocation**: if the pod is already considered “injected” (e.g. envoy or proxy-init present) but operator mounts are still missing, **`NeedsKeycloakClientCredentialsVolumePatch`** returns true and the webhook applies **only** the operator Secret mounts (`authbridge_webhook.go`).
@@ -101,7 +104,7 @@ Other workloads are ignored by this controller.
 ### 3.2 Workload
 
 - **Deployment** or **StatefulSet** (not bare Pods for operator ownership of Secrets).
-- Pod template labels: `kagenti.io/client-registration-inject: "false"` and `kagenti.io/type: agent` or `tool` (subject to `injectTools`).
+- Pod template labels: `kagenti.io/type: agent` or `tool` (subject to `injectTools`). Do **not** set `kagenti.io/client-registration-inject: "true"` unless you require the legacy sidecar.
 - For **SPIRE-enabled** namespaces: `spec.template.spec.serviceAccountName` must be a **dedicated** ServiceAccount (not `default`).
 
 ### 3.3 Operator configuration
@@ -142,20 +145,20 @@ That shape is intentional for this controller:
 2. **Upgrade webhook** (operator Secret mounts + reinvocation path).
 3. **Configure** `--spire-trust-domain` on the operator if agent namespaces use SPIRE (`SPIRE_ENABLED=true`).
 
-Rolling webhook before operator can leave workloads with `client-registration-inject=false` **without** registration until the operator is available; rolling operator before webhook can create Secrets and annotations **without** mounts until the new webhook is live. Short overlap is acceptable if you migrate workloads **after** both are deployed.
+Rolling webhook before operator can leave default workloads **without** registration until the operator is available; rolling operator before webhook can create Secrets and annotations **without** mounts until the new webhook is live. Short overlap is acceptable if you migrate workloads **after** both are deployed.
 
-### 4.2 Adopting operator-managed registration per workload
+### 4.2 Operator-managed registration (default)
 
 1. Ensure the namespace has `authbridge-config` and `keycloak-admin-secret`.
-2. On the workload pod template, set **`kagenti.io/client-registration-inject: "false"`**.
+2. Use normal agent/tool labels; **omit** `kagenti.io/client-registration-inject: "true"` unless you need the legacy sidecar.
 3. If SPIRE is on, set a **dedicated** `serviceAccountName`.
-4. **Restart** or roll the workload so the webhook sees the new template and the operator reconciles.
+4. **Restart** or roll the workload so the operator reconciles and the webhook applies Secret mounts (including on reinvocation).
 
 The operator will create or reuse the Keycloak client and Secret; the webhook will inject mounts on create or on reinvocation.
 
-### 4.3 Rollback
+### 4.3 Rollback to legacy sidecar registration
 
-- Remove **`kagenti.io/client-registration-inject: "false"`** (or set client-registration injection back to the default path) and **remove** the operator annotation if present.
+- Set **`kagenti.io/client-registration-inject: "true"`** on the pod template and **remove** the operator annotation `kagenti.io/keycloak-client-credentials-secret-name` if present.
 - Roll pods so the **client-registration sidecar** (or combined authbridge with registration) runs again.
 - Optionally delete operator-created Secrets named `kagenti-keycloak-client-credentials-*` after confirming Keycloak clients are recreated by the sidecar path if needed.
 

@@ -40,17 +40,18 @@ const (
 	authbridgeConfigConfigMap = "authbridge-config"
 	keycloakAdminSecret       = "keycloak-admin-secret"
 
-	// LabelClientRegistrationInject opts a workload out of webhook-injected client-registration;
-	// the operator controller then registers the client and sets AnnotationKeycloakClientSecretName.
+	// LabelClientRegistrationInject: when not "true", the operator registers the OAuth client and sets
+	// AnnotationKeycloakClientSecretName. Value "true" opts the workload into the legacy webhook
+	// client-registration sidecar; the operator skips registration for that workload.
 	LabelClientRegistrationInject = "kagenti.io/client-registration-inject"
 
 	// AnnotationKeycloakClientSecretName must match kagenti-webhook injector.AnnotationKeycloakClientSecretName.
 	AnnotationKeycloakClientSecretName = "kagenti.io/keycloak-client-credentials-secret-name"
 )
 
-// ClientRegistrationReconciler registers OAuth clients in Keycloak and patches agent workloads that
-// use kagenti.io/client-registration-inject=false so the webhook still injects envoy/SPIRE but not
-// the registration sidecar. The Secret is created before the pod template annotation is set so new Pods
+// ClientRegistrationReconciler registers OAuth clients in Keycloak and patches agent/tool workloads that
+// use the default path (label absent or not "true") so the webhook injects envoy/SPIRE without the
+// legacy registration sidecar. The Secret is created before the pod template annotation is set so new Pods
 // never reference a missing Secret; the webhook mounts the Secret for injected sidecars that use shared-data.
 type ClientRegistrationReconciler struct {
 	client.Client
@@ -260,8 +261,8 @@ func keycloakClientCredentialsSkipReason(labels map[string]string, injectTools b
 	if labels == nil {
 		return "pod template has no labels"
 	}
-	if labels[LabelClientRegistrationInject] != "false" {
-		return fmt.Sprintf("%s is not \"false\" (only workloads that opt out of webhook-injected client-registration are managed here)", LabelClientRegistrationInject)
+	if labels[LabelClientRegistrationInject] == "true" {
+		return fmt.Sprintf("%s is \"true\" (legacy webhook client-registration sidecar; operator-managed registration disabled for this workload)", LabelClientRegistrationInject)
 	}
 	switch labels[LabelAgentType] {
 	case LabelValueAgent:

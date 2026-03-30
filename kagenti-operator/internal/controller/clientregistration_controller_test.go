@@ -30,7 +30,22 @@ func TestWorkloadWantsOperatorClientReg(t *testing.T) {
 		want        bool
 	}{
 		{
-			name: "agent with opt-out",
+			name: "agent default — operator-managed registration",
+			labels: map[string]string{
+				LabelAgentType: LabelValueAgent,
+			},
+			want: true,
+		},
+		{
+			name: "agent with legacy sidecar opt-in — operator skips",
+			labels: map[string]string{
+				LabelAgentType:                LabelValueAgent,
+				LabelClientRegistrationInject: "true",
+			},
+			want: false,
+		},
+		{
+			name: "agent explicit false — same as default (operator-managed)",
 			labels: map[string]string{
 				LabelAgentType:                LabelValueAgent,
 				LabelClientRegistrationInject: "false",
@@ -38,28 +53,28 @@ func TestWorkloadWantsOperatorClientReg(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "agent without opt-out",
+			name: "tool default with injectTools",
 			labels: map[string]string{
-				LabelAgentType: LabelValueAgent,
-			},
-			want: false,
-		},
-		{
-			name: "tool with opt-out and injectTools",
-			labels: map[string]string{
-				LabelAgentType:                string(agentv1alpha1.RuntimeTypeTool),
-				LabelClientRegistrationInject: "false",
+				LabelAgentType: string(agentv1alpha1.RuntimeTypeTool),
 			},
 			injectTools: true,
 			want:        true,
 		},
 		{
-			name: "tool with opt-out no injectTools",
+			name: "tool default no injectTools",
 			labels: map[string]string{
-				LabelAgentType:                string(agentv1alpha1.RuntimeTypeTool),
-				LabelClientRegistrationInject: "false",
+				LabelAgentType: string(agentv1alpha1.RuntimeTypeTool),
 			},
 			injectTools: false,
+			want:        false,
+		},
+		{
+			name: "tool with legacy opt-in — operator skips regardless of injectTools",
+			labels: map[string]string{
+				LabelAgentType:                string(agentv1alpha1.RuntimeTypeTool),
+				LabelClientRegistrationInject: "true",
+			},
+			injectTools: true,
 			want:        false,
 		},
 	}
@@ -151,9 +166,8 @@ func testDeploymentForClientReg(ns, name string) *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app":                         name,
-						LabelAgentType:                LabelValueAgent,
-						LabelClientRegistrationInject: "false",
+						"app":          name,
+						LabelAgentType: LabelValueAgent,
 					},
 				},
 				Spec: corev1.PodSpec{},
