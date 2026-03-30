@@ -83,7 +83,7 @@ Other workloads are ignored by this controller.
 
 | Component | Flag / gate | Role |
 |-----------|-------------|------|
-| Operator | `--enable-operator-client-registration` (default **true**) | Master switch for the ClientRegistration controller. |
+| Operator | `--enable-operator-client-registration` (default **false**) | Master switch for the ClientRegistration controller. |
 | Operator | `--spire-trust-domain` | Required for SPIFFE-shaped client IDs when `authbridge-config` has `SPIRE_ENABLED=true`. |
 | Webhook | `--enable-client-registration` | Cluster-wide gate for client-registration **injection** (precedence still applies). |
 | Webhook | Feature gates ConfigMap | `clientRegistration`, `injectTools`, `globalEnabled`, etc., same as for injected sidecars. |
@@ -107,9 +107,27 @@ Other workloads are ignored by this controller.
 ### 3.3 Operator configuration
 
 - When `authbridge-config` sets `SPIRE_ENABLED=true`, configure **`--spire-trust-domain`** to match the SPIRE server trust domain (same value as used for workload SPIFFE IDs).
-- Ensure the operator can read **`authbridge-config`** and **`keycloak-admin-secret`** in agent namespaces (RBAC is extended for ConfigMaps and Secrets as needed).
+- Ensure the operator can read **`authbridge-config`** and **`keycloak-admin-secret`** in agent namespaces, and create/update **`kagenti-keycloak-client-credentials-*`** Secrets there (see RBAC below).
 
-### 3.4 Webhook configuration
+### 3.4 RBAC: why Secret rules are cluster-wide
+
+The operator is installed with a **ClusterRole** bound to its ServiceAccount via a **ClusterRoleBinding** (the default kubebuilder layout in `config/rbac/role.yaml`). That pattern grants the listed verbs on **Secrets in every namespace**, which looks broad compared to “only agent namespaces.”
+
+That shape is intentional for this controller:
+
+1. **RBAC expressiveness** — A `PolicyRule` on `secrets` under a **ClusterRole** does not take a namespace allowlist. You cannot say “get/list/watch Secrets only in namespaces A, B, and C” in one cluster-scoped role. Namespace scoping is achieved by using **Roles** plus **RoleBindings** in each namespace (or by separate automation that maintains bindings), not by a single static manifest for a cluster-wide operator.
+
+2. **Unknown agent namespaces at install time** — **ClientRegistration** reconciles **Deployments** and **StatefulSets** in **any** namespace where they match the label predicate. Platform teams add agent workloads and namespaces over time; the operator is not tied to a fixed list of namespaces configured when the ClusterRole is applied.
+
+3. **Data plane placement** — **`authbridge-config`** and **`keycloak-admin-secret`** live in the **workload namespace** (same contract as the webhook-injected sidecar). The controller must **Get** those Secrets (and **Create**/**Patch**/**Update** the derived credentials Secret) in that namespace on every reconcile. Without cluster-wide Secret permissions, every new agent namespace would require a coordinated RBAC update before reconciliation could succeed.
+
+4. **`list` / `watch`** — The kubebuilder marker generates **list** and **watch** alongside **get** for Secrets, consistent with other reconcilers in this project and with controller-runtime’s usual expectation that the delegating client can sync or fall back to the API without ad-hoc verb subsets per resource.
+
+**Tighter models (not used here)** include: a dedicated **ClusterRole** that only contains Secret rules, bound only where needed via **RoleBinding** in each agent namespace (GitOps or a separate controller maintains those bindings); or policy engines that block the operator from namespaces that are not agent workloads. Those reduce blast radius but add operational steps. This project keeps a **single binding** and documents the trade-off.
+
+**Optional pattern** — `config/rbac/manager_agent_secrets_clusterrole.yaml` plus per-namespace **RoleBinding** (`agent_namespace_secrets_role_binding.example.yaml`) scopes Secret access to namespaces where you install the binding; the main **manager-role** would then omit Secret verbs if you split the operator into two service accounts or otherwise separate concerns. The default install keeps Secrets on **manager-role** for simplicity.
+
+### 3.5 Webhook configuration
 
 - **`reinvocationPolicy: IfNeeded`** on the mutating webhook so late annotations still get mounts.
 - Pod template must eventually carry **`kagenti.io/keycloak-client-credentials-secret-name`** once the operator has reconciled; until then, auth consumers on `shared-data` may not see credentials (operator retries with backoff).
