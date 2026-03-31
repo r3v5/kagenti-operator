@@ -44,6 +44,7 @@ import (
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
 	"github.com/kagenti/operator/internal/agentcard"
 	"github.com/kagenti/operator/internal/controller"
+	"github.com/kagenti/operator/internal/keycloak"
 	"github.com/kagenti/operator/internal/signature"
 	"github.com/kagenti/operator/internal/tekton"
 	webhookv1alpha1 "github.com/kagenti/operator/internal/webhook/v1alpha1"
@@ -76,6 +77,7 @@ func main() {
 	var requireA2ASignature bool
 	var signatureAuditMode bool
 	var enforceNetworkPolicies bool
+	var enableOperatorClientRegistration bool
 
 	var spireTrustDomain string
 	var spireTrustBundleConfigMapName string
@@ -107,6 +109,9 @@ func main() {
 		"When true, log signature verification failures but don't block (use for rollout)")
 	flag.BoolVar(&enforceNetworkPolicies, "enforce-network-policies", false,
 		"Create NetworkPolicies to restrict traffic for agents with unverified signatures")
+	flag.BoolVar(&enableOperatorClientRegistration, "enable-operator-client-registration", false,
+		"Reconcile Keycloak client registration for agent/tool workloads unless "+
+			"kagenti.io/client-registration-inject=true (legacy sidecar)")
 
 	flag.StringVar(&spireTrustDomain, "spire-trust-domain", "",
 		"SPIRE trust domain for identity binding (e.g. 'example.org')")
@@ -323,6 +328,20 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentRuntime")
 		os.Exit(1)
+	}
+
+	if enableOperatorClientRegistration {
+		if err = (&controller.ClientRegistrationReconciler{
+			Client:                  mgr.GetClient(),
+			APIReader:               mgr.GetAPIReader(),
+			Scheme:                  mgr.GetScheme(),
+			SpireTrustDomain:        spireTrustDomain,
+			KeycloakAdminTokenCache: &keycloak.CachedAdminTokenProvider{},
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ClientRegistration")
+			os.Exit(1)
+		}
+		setupLog.Info("Operator-managed client registration controller enabled")
 	}
 
 	if controller.TektonConfigCRDExists(mgr.GetConfig()) {
