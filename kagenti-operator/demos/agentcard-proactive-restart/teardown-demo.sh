@@ -6,8 +6,8 @@
 
 set -euo pipefail
 
-OPERATOR_NS="${OPERATOR_NS:-agentcard-system}"
-OPERATOR_DEPLOY="${OPERATOR_DEPLOY:-agentcard-operator}"
+OPERATOR_NS="${OPERATOR_NS:-kagenti-system}"
+OPERATOR_DEPLOY="${OPERATOR_DEPLOY:-kagenti-controller-manager}"
 
 echo "=== AgentCard Proactive Restart Demo Teardown ==="
 echo ""

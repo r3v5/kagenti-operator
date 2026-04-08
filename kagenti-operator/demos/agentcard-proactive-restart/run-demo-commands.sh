@@ -12,8 +12,8 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:-agents}"
 AGENTCARD="${AGENTCARD:-weather-agent-card}"
 DEPLOYMENT="${DEPLOYMENT:-weather-agent}"
-OPERATOR_NS="${OPERATOR_NS:-agentcard-system}"
-OPERATOR_DEPLOY="${OPERATOR_DEPLOY:-agentcard-operator}"
+OPERATOR_NS="${OPERATOR_NS:-kagenti-system}"
+OPERATOR_DEPLOY="${OPERATOR_DEPLOY:-kagenti-controller-manager}"
 
 # Capture the live operator args so we can restore them exactly after the demo.
 ORIGINAL_ARGS_JSON=$(kubectl get deployment "$OPERATOR_DEPLOY" -n "$OPERATOR_NS" \
