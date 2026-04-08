@@ -88,6 +88,10 @@ certmanager:
 networkPolicy:
   enable: false
 
+# [MLFLOW]: MLflow experiment tracking integration
+mlflow:
+  enable: false
+
 # [SIGNATURE VERIFICATION]: A2A agent card signature verification via SPIRE x5c
 signatureVerification:
   # Enable signature verification for agent cards

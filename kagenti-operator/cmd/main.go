@@ -45,6 +45,7 @@ import (
 	"github.com/kagenti/operator/internal/agentcard"
 	"github.com/kagenti/operator/internal/controller"
 	"github.com/kagenti/operator/internal/keycloak"
+	"github.com/kagenti/operator/internal/mlflow"
 	"github.com/kagenti/operator/internal/signature"
 	"github.com/kagenti/operator/internal/tekton"
 	webhookconfig "github.com/kagenti/operator/internal/webhook/config"
@@ -61,6 +62,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(agentv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(mlflow.AddToScheme(scheme))
 	utilruntime.Must(tekton.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -84,6 +86,7 @@ func main() {
 	var signatureAuditMode bool
 	var enforceNetworkPolicies bool
 	var enableOperatorClientRegistration bool
+	var enableMLflow bool
 
 	var spireTrustDomain string
 	var spireTrustBundleConfigMapName string
@@ -123,6 +126,8 @@ func main() {
 	flag.BoolVar(&enableOperatorClientRegistration, "enable-operator-client-registration", false,
 		"Reconcile Keycloak client registration for agent/tool workloads unless "+
 			"kagenti.io/client-registration-inject=true (legacy sidecar)")
+	flag.BoolVar(&enableMLflow, "enable-mlflow", false,
+		"Enable MLflow experiment tracking integration")
 
 	flag.StringVar(&spireTrustDomain, "spire-trust-domain", "",
 		"SPIRE trust domain for identity binding (e.g. 'example.org')")
@@ -379,6 +384,18 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentRuntime")
 		os.Exit(1)
+	}
+
+	if enableMLflow {
+		if err = (&controller.MLflowReconciler{
+			Client:   mgr.GetClient(),
+			Scheme:   mgr.GetScheme(),
+			Recorder: mgr.GetEventRecorderFor("mlflow-controller"),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "MLflow")
+			os.Exit(1)
+		}
+		setupLog.Info("MLflow experiment tracking controller enabled")
 	}
 
 	if enableOperatorClientRegistration {
