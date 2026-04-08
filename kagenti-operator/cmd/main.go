@@ -86,6 +86,7 @@ func main() {
 	var signatureAuditMode bool
 	var enforceNetworkPolicies bool
 	var enableOperatorClientRegistration bool
+	var enableMLflow bool
 
 	var spireTrustDomain string
 	var spireTrustBundleConfigMapName string
@@ -125,6 +126,8 @@ func main() {
 	flag.BoolVar(&enableOperatorClientRegistration, "enable-operator-client-registration", false,
 		"Reconcile Keycloak client registration for agent/tool workloads unless "+
 			"kagenti.io/client-registration-inject=true (legacy sidecar)")
+	flag.BoolVar(&enableMLflow, "enable-mlflow", true,
+		"Enable MLflow experiment tracking integration")
 
 	flag.StringVar(&spireTrustDomain, "spire-trust-domain", "",
 		"SPIRE trust domain for identity binding (e.g. 'example.org')")
@@ -383,13 +386,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.MLflowReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("mlflow-controller"),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MLflow")
-		os.Exit(1)
+	if enableMLflow {
+		if err = (&controller.MLflowReconciler{
+			Client:   mgr.GetClient(),
+			Scheme:   mgr.GetScheme(),
+			Recorder: mgr.GetEventRecorderFor("mlflow-controller"),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "MLflow")
+			os.Exit(1)
+		}
+		setupLog.Info("MLflow experiment tracking controller enabled")
 	}
 
 	if enableOperatorClientRegistration {

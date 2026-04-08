@@ -44,9 +44,6 @@ const (
 	// for agent access to MLflow resources (RHOAI 3.4+).
 	DefaultMLflowClusterRole = "mlflow-operator-mlflow-integration"
 
-	// DefaultMLflowNamespace is the namespace used when the MLflow CRD is cluster-scoped.
-	DefaultMLflowNamespace = "redhat-ods-applications"
-
 	// MLflow annotation keys stored on the PodTemplateSpec.
 	AnnotationMLflowExperimentID   = "mlflow.kagenti.io/experiment-id"
 	AnnotationMLflowExperimentName = "mlflow.kagenti.io/experiment-name"
@@ -64,10 +61,6 @@ type MLflowReconciler struct {
 	// MLflowClusterRole is the ClusterRole to bind agent SAs to.
 	// Defaults to DefaultMLflowClusterRole if empty.
 	MLflowClusterRole string
-
-	// MLflowDefaultNamespace is the namespace to use when the MLflow CRD is
-	// cluster-scoped. Defaults to DefaultMLflowNamespace if empty.
-	MLflowDefaultNamespace string
 
 	// NewMLflowClient creates an MLflow client for the given base URL.
 	// If nil, a default client is used.
@@ -161,13 +154,6 @@ func (r *MLflowReconciler) clusterRoleName() string {
 	return DefaultMLflowClusterRole
 }
 
-func (r *MLflowReconciler) defaultMLflowNamespace() string {
-	if r.MLflowDefaultNamespace != "" {
-		return r.MLflowDefaultNamespace
-	}
-	return DefaultMLflowNamespace
-}
-
 func (r *MLflowReconciler) mlflowClient(baseURL string) *mlflow.Client {
 	if r.NewMLflowClient != nil {
 		return r.NewMLflowClient(baseURL)
@@ -197,11 +183,11 @@ func (r *MLflowReconciler) resolveTrackingURI(ctx context.Context) string {
 	for i := range list.Items {
 		cr := &list.Items[i]
 		if meta.IsStatusConditionTrue(cr.Status.Conditions, "Available") {
-			ns := cr.GetNamespace()
-			if ns == "" {
-				ns = r.defaultMLflowNamespace()
+			if cr.Status.Address == nil || cr.Status.Address.URL == "" {
+				logger.Info("MLflow CR is Available but status.address.url is not set, skipping", "cr", cr.GetName())
+				continue
 			}
-			uri := fmt.Sprintf("https://mlflow.%s.svc.cluster.local:8443", ns)
+			uri := cr.Status.Address.URL
 			logger.V(1).Info("Auto-discovered MLflow tracking URI", "uri", uri, "cr", cr.GetName())
 			return uri
 		}

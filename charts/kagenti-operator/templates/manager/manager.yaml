@@ -31,6 +31,9 @@ spec:
             {{- range .Values.controllerManager.container.args }}
             - {{ . }}
             {{- end }}
+            {{- if .Values.mlflow.enable }}
+            - "--enable-mlflow=true"
+            {{- end }}
             {{- if .Values.signatureVerification.enabled }}
             - "--require-a2a-signature=true"
             {{- if .Values.signatureVerification.auditMode }}

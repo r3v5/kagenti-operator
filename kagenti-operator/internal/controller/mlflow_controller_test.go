@@ -272,18 +272,6 @@ var _ = Describe("MLflow Controller helpers", func() {
 		})
 	})
 
-	Describe("defaultMLflowNamespace", func() {
-		It("should return the default when MLflowDefaultNamespace is empty", func() {
-			r := &MLflowReconciler{}
-			Expect(r.defaultMLflowNamespace()).To(Equal(DefaultMLflowNamespace))
-		})
-
-		It("should return the custom value when set", func() {
-			r := &MLflowReconciler{MLflowDefaultNamespace: "custom-ns"}
-			Expect(r.defaultMLflowNamespace()).To(Equal("custom-ns"))
-		})
-	})
-
 	Describe("setEnvVar", func() {
 		It("should add a new env var", func() {
 			container := &corev1.Container{Name: "test"}
