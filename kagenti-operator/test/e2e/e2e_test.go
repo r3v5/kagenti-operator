@@ -934,11 +934,11 @@ rules:
 				g.Expect(phase).To(Equal("Error"))
 			}).Should(Succeed())
 
-			By("verifying error condition mentions the target")
+			By("verifying TargetResolved condition mentions the target")
 			Eventually(func(g Gomega) {
 				msg, err := utils.KubectlGetJsonpath("agentruntime", "test-missing-target",
 					agentRuntimeTestNamespace,
-					"{.status.conditions[?(@.type=='Ready')].message}")
+					"{.status.conditions[?(@.type=='TargetResolved')].message}")
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(msg).To(ContainSubstring("nonexistent-deployment"))
 			}).Should(Succeed())
