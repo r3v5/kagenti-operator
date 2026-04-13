@@ -114,6 +114,7 @@ spec:
       labels:
         app.kubernetes.io/name: noproto-agent
         kagenti.io/type: agent
+        kagenti.io/inject: disabled
     spec:
       securityContext:
         runAsNonRoot: true

@@ -36,8 +36,6 @@ import (
 	"github.com/kagenti/operator/internal/controller"
 )
 
-var defaultsLog = log.Log.WithName("defaults-config-reconciler")
-
 // DefaultsConfigReconciler watches cluster and namespace ConfigMaps and
 // updates the kagenti.io/config-hash annotation on workloads that have
 // the kagenti.io/type label but are NOT managed by an AgentRuntime CR.

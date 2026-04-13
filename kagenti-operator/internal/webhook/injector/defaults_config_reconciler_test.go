@@ -545,9 +545,9 @@ func TestIsClusterConfigMapKey(t *testing.T) {
 
 func TestIsClusterConfigMap(t *testing.T) {
 	tests := []struct {
-		name      string
-		cm        *corev1.ConfigMap
-		expected  bool
+		name     string
+		cm       *corev1.ConfigMap
+		expected bool
 	}{
 		{
 			name: "platform config",
