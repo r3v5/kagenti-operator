@@ -254,42 +254,9 @@ func main() {
 		})
 	}
 
-	// Scope the ConfigMap informer to only kagenti-relevant ConfigMaps.
-	// Without this, the controller would cache ALL ConfigMaps cluster-wide.
-	//
-	// Three types of ConfigMaps are relevant:
-	// 1. Cluster-level defaults in kagenti-system:
-	//    - kagenti-platform-config (platform-wide sidecar config)
-	//    - kagenti-feature-gates (which AuthBridge components are enabled)
-	//    Both are deployed by the kagenti-operator Helm chart and share the
-	//    label app.kubernetes.io/name=kagenti-operator-chart.
-	//
-	// 2. Namespace-level defaults in agent namespaces:
-	//    ConfigMaps labeled kagenti.io/defaults=true, deployed by platform
-	//    engineers via Helm/Kustomize to override cluster defaults per namespace.
-	//
-	// 3. SPIRE trust bundle (when signature verification is enabled):
-	//    The trust bundle ConfigMap (e.g. spire-bundle) in its configured namespace,
-	//    selected by metadata.name via a field selector.
-	cmCacheNamespaces := map[string]cache.Config{
-		controller.ClusterDefaultsNamespace: {
-			LabelSelector: labels.SelectorFromSet(map[string]string{
-				"app.kubernetes.io/name": "kagenti-operator-chart",
-			}),
-		},
-		cache.AllNamespaces: {
-			LabelSelector: labels.SelectorFromSet(map[string]string{
-				controller.LabelNamespaceDefaults: "true",
-			}),
-		},
-	}
-	if requireA2ASignature && spireTrustBundleConfigMapNS != "" {
-		cmCacheNamespaces[spireTrustBundleConfigMapNS] = cache.Config{
-			FieldSelector: fields.SelectorFromSet(fields.Set{
-				"metadata.name": spireTrustBundleConfigMapName,
-			}),
-		}
-	}
+	cmCacheNamespaces := buildConfigMapCacheNamespaces(
+		requireA2ASignature, spireTrustBundleConfigMapName, spireTrustBundleConfigMapNS,
+	)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:  scheme,
@@ -521,6 +488,51 @@ func getNamespacesToWatch() map[string]cache.Config {
 	}
 	if len(namespaces) == 0 {
 		return nil
+	}
+	return namespaces
+}
+
+// buildConfigMapCacheNamespaces returns the per-namespace cache selectors for
+// ConfigMaps. The scoped cache ensures only kagenti-relevant ConfigMaps are
+// watched instead of every ConfigMap cluster-wide.
+//
+// Three categories are included:
+//  1. Cluster-level defaults in kagenti-system (label selector).
+//  2. Namespace-level defaults in any namespace (label selector).
+//  3. SPIRE trust bundle (field selector on metadata.name), added only when
+//     signature verification is enabled.
+func buildConfigMapCacheNamespaces(
+	requireA2ASignature bool, spireTrustBundleConfigMapName, spireTrustBundleConfigMapNS string,
+) map[string]cache.Config {
+	namespaces := map[string]cache.Config{
+		controller.ClusterDefaultsNamespace: {
+			LabelSelector: labels.SelectorFromSet(map[string]string{
+				"app.kubernetes.io/name": "kagenti-operator-chart",
+			}),
+		},
+		cache.AllNamespaces: {
+			LabelSelector: labels.SelectorFromSet(map[string]string{
+				controller.LabelNamespaceDefaults: "true",
+			}),
+		},
+	}
+	if requireA2ASignature && spireTrustBundleConfigMapNS != "" {
+		if _, collision := namespaces[spireTrustBundleConfigMapNS]; collision {
+			setupLog.Error(
+				errors.New("namespace collision: --spire-trust-bundle-configmap-namespace matches "+
+					"the cluster defaults namespace"),
+				"SPIRE trust bundle will not be cached; signature verification may fail. "+
+					"Use a different namespace for the trust bundle ConfigMap",
+				"trustBundleNamespace", spireTrustBundleConfigMapNS,
+				"clusterDefaultsNamespace", controller.ClusterDefaultsNamespace,
+			)
+		} else {
+			namespaces[spireTrustBundleConfigMapNS] = cache.Config{
+				FieldSelector: fields.SelectorFromSet(fields.Set{
+					"metadata.name": spireTrustBundleConfigMapName,
+				}),
+			}
+		}
 	}
 	return namespaces
 }
