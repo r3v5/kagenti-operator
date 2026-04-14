@@ -216,6 +216,7 @@ func (r *DefaultsConfigReconciler) updateConfigHash(ctx context.Context, namespa
 
 // namespacesWithKagentiWorkloads returns all namespaces that contain at
 // least one Deployment or StatefulSet with the kagenti.io/type label.
+// TODO: consider adding a field indexer on KagentiTypeLabel if cluster size grows.
 func (r *DefaultsConfigReconciler) namespacesWithKagentiWorkloads(ctx context.Context) ([]string, error) {
 	seen := make(map[string]bool)
 
