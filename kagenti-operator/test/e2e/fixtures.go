@@ -41,6 +41,7 @@ spec:
       labels:
         app.kubernetes.io/name: echo-agent
         kagenti.io/type: agent
+        kagenti.io/inject: disabled
         protocol.kagenti.io/a2a: ""
     spec:
       securityContext:
@@ -95,6 +96,9 @@ spec:
 
 // noProtocolAgentFixture returns YAML for noproto-agent Deployment (S2) - has
 // kagenti.io/type=agent but NO protocol.kagenti.io/* label.
+// kagenti.io/inject=disabled is set because this test validates AgentCard sync
+// behaviour, not sidecar injection. Without the opt-out the defaults-only
+// injection path would inject sidecars that the pause container cannot support.
 func noProtocolAgentFixture() string {
 	return `apiVersion: apps/v1
 kind: Deployment
@@ -115,6 +119,7 @@ spec:
       labels:
         app.kubernetes.io/name: noproto-agent
         kagenti.io/type: agent
+        kagenti.io/inject: disabled
     spec:
       securityContext:
         runAsNonRoot: true
@@ -182,6 +187,7 @@ spec:
       labels:
         app.kubernetes.io/name: audit-agent
         kagenti.io/type: agent
+        kagenti.io/inject: disabled
         protocol.kagenti.io/a2a: ""
     spec:
       securityContext:
@@ -335,6 +341,7 @@ spec:
       labels:
         app.kubernetes.io/name: signed-agent
         kagenti.io/type: agent
+        kagenti.io/inject: disabled
         protocol.kagenti.io/a2a: ""
     spec:
       serviceAccountName: signed-agent-sa
