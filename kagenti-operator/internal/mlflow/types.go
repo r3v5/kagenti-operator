@@ -51,13 +51,8 @@ type MLflow struct {
 }
 
 type MLflowStatus struct {
-	Conditions []metav1.Condition   `json:"conditions,omitempty"`
-	Address    *MLflowAddressStatus `json:"address,omitempty"`
-}
-
-// MLflowAddressStatus holds the internal in-cluster endpoint for the MLflow Service.
-type MLflowAddressStatus struct {
-	// URL is the in-cluster HTTPS URL for the managed MLflow Service.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	// URL is the external gateway URL for the MLflow server (e.g. via the RHOAI data-science gateway).
 	URL string `json:"url,omitempty"`
 }
 
@@ -94,9 +89,6 @@ func (in *MLflowStatus) DeepCopyInto(out *MLflowStatus) {
 		for i := range in.Conditions {
 			in.Conditions[i].DeepCopyInto(&out.Conditions[i])
 		}
-	}
-	if in.Address != nil {
-		out.Address = &MLflowAddressStatus{URL: in.Address.URL}
 	}
 }
 

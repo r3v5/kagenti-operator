@@ -22,8 +22,6 @@ package mlflow
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,10 +38,6 @@ const (
 	// DefaultTokenPath is the projected SA token path in a pod.
 	DefaultTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
-	// DefaultCACertPath is the service-serving CA certificate path.
-	// On OpenShift, the service-ca.crt is projected into the SA token volume.
-	DefaultCACertPath = "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
-
 	// WorkspaceHeader is the MLflow workspace header (namespace-based isolation).
 	WorkspaceHeader = "X-MLFLOW-WORKSPACE"
 )
@@ -55,10 +49,6 @@ type Client struct {
 
 	// TokenPath is the path to the SA token file. Defaults to DefaultTokenPath.
 	TokenPath string
-
-	// CACertPath is the path to the CA certificate for TLS verification.
-	// Defaults to the in-cluster SA CA cert.
-	CACertPath string
 
 	// HTTPClient is the HTTP client to use. If nil, a default client with 30s timeout is used.
 	HTTPClient *http.Client
@@ -111,30 +101,12 @@ func IsResourceAlreadyExists(err error) bool {
 func (c *Client) httpClient() *http.Client {
 	c.httpOnce.Do(func() {
 		if c.HTTPClient == nil {
-			tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
-			if caCert, err := os.ReadFile(c.caCertPath()); err == nil {
-				pool, err := x509.SystemCertPool()
-				if err != nil {
-					// Fall back to an empty pool; the service-CA cert will still be appended.
-					pool = x509.NewCertPool()
-				}
-				pool.AppendCertsFromPEM(caCert)
-				tlsCfg.RootCAs = pool
-			}
 			c.HTTPClient = &http.Client{
-				Timeout:   30 * time.Second,
-				Transport: &http.Transport{TLSClientConfig: tlsCfg},
+				Timeout: 30 * time.Second,
 			}
 		}
 	})
 	return c.HTTPClient
-}
-
-func (c *Client) caCertPath() string {
-	if c.CACertPath != "" {
-		return c.CACertPath
-	}
-	return DefaultCACertPath
 }
 
 func (c *Client) tokenPath() string {

@@ -184,13 +184,11 @@ func (r *MLflowReconciler) resolveTrackingURI(ctx context.Context) string {
 	for i := range list.Items {
 		cr := &list.Items[i]
 		if meta.IsStatusConditionTrue(cr.Status.Conditions, "Available") {
-			if cr.Status.Address == nil || cr.Status.Address.URL == "" {
-				logger.Info("MLflow CR is Available but status.address.url is not set, skipping", "cr", cr.GetName())
-				continue
+			if cr.Status.URL != "" {
+				logger.V(1).Info("Auto-discovered MLflow gateway URL", "uri", cr.Status.URL, "cr", cr.GetName())
+				return cr.Status.URL
 			}
-			uri := cr.Status.Address.URL
-			logger.V(1).Info("Auto-discovered MLflow tracking URI", "uri", uri, "cr", cr.GetName())
-			return uri
+			logger.Info("MLflow CR is Available but status.url is not set, skipping", "cr", cr.GetName())
 		}
 	}
 
@@ -198,17 +196,14 @@ func (r *MLflowReconciler) resolveTrackingURI(ctx context.Context) string {
 }
 
 // mlflowEnvVars returns the environment variables to inject into agent containers.
-// TODO(mlflow): MLFLOW_TRACKING_SERVER_CERT_PATH is OpenShift-specific — the
-// service-ca operator injects service-ca.crt into the SA volume. On vanilla
-// Kubernetes this file does not exist and MLflow clients will fail TLS verification.
-// This should be made configurable (Helm value / annotation) before supporting non-OpenShift clusters.
+// The tracking URI is typically the external gateway URL which uses a publicly-trusted
+// TLS certificate, so no custom CA cert path is needed.
 func mlflowEnvVars(trackingURI, experimentID, experimentName string) map[string]string {
 	return map[string]string{
-		"MLFLOW_TRACKING_URI":              trackingURI,
-		"MLFLOW_TRACKING_AUTH":             "kubernetes-namespaced",
-		"MLFLOW_EXPERIMENT_ID":             experimentID,
-		"MLFLOW_EXPERIMENT_NAME":           experimentName,
-		"MLFLOW_TRACKING_SERVER_CERT_PATH": "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt",
+		"MLFLOW_TRACKING_URI":    trackingURI,
+		"MLFLOW_TRACKING_AUTH":   "kubernetes-namespaced",
+		"MLFLOW_EXPERIMENT_ID":   experimentID,
+		"MLFLOW_EXPERIMENT_NAME": experimentName,
 	}
 }
 

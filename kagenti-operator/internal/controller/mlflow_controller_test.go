@@ -232,7 +232,6 @@ var _ = Describe("MLflow Controller", func() {
 			Expect(envMap["MLFLOW_TRACKING_AUTH"]).To(Equal("kubernetes-namespaced"))
 			Expect(envMap["MLFLOW_EXPERIMENT_ID"]).To(Equal("exp-123"))
 			Expect(envMap["MLFLOW_EXPERIMENT_NAME"]).To(Equal("mlflow-full"))
-			Expect(envMap["MLFLOW_TRACKING_SERVER_CERT_PATH"]).To(Equal("/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"))
 
 			Expect(updated.Spec.Template.Annotations[AnnotationMLflowExperimentID]).To(Equal("exp-123"))
 			Expect(updated.Spec.Template.Annotations[AnnotationMLflowExperimentName]).To(Equal("mlflow-full"))
