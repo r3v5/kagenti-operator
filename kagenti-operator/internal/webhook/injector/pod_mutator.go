@@ -305,24 +305,35 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 			originalAgentPort = 8000
 			mutatorLog.Info("no container port found, using default", "port", originalAgentPort)
 		}
+		if agentContainer == nil {
+			mutatorLog.Info("no agent container found to relocate — reverse proxy backend may be unreachable")
+		}
 
-		// Find free ports for the agent and forward proxy.
 		// findFreePort returns the first port >= start that isn't in usedPorts,
-		// and marks it as used. Respects the valid port range (1-65535).
-		findFreePort := func(start int32) int32 {
+		// and marks it as used.
+		findFreePort := func(start int32) (int32, error) {
 			p := start
-			for usedPorts[p] && p < 65535 {
+			for usedPorts[p] && p <= 65535 {
 				p++
 			}
+			if p > 65535 {
+				return 0, fmt.Errorf("no free port available starting from %d", start)
+			}
 			usedPorts[p] = true
-			return p
+			return p, nil
 		}
 
 		// Reserve the original agent port for the reverse proxy
 		usedPorts[originalAgentPort] = true
 
-		newAgentPort := findFreePort(originalAgentPort + 1)
-		forwardProxyPort := findFreePort(8081)
+		newAgentPort, err := findFreePort(originalAgentPort + 1)
+		if err != nil {
+			return false, fmt.Errorf("proxy-sidecar port assignment: %w", err)
+		}
+		forwardProxyPort, err := findFreePort(8081)
+		if err != nil {
+			return false, fmt.Errorf("proxy-sidecar port assignment: %w", err)
+		}
 
 		// Move the agent to the free port.
 		// Most agent frameworks (Python/uvicorn, Node/express, FastAPI) read the
