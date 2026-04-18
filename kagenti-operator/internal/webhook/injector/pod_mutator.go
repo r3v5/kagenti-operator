@@ -380,7 +380,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 			podSpec.Containers = append(podSpec.Containers, builder.BuildClientRegistrationContainerWithSpireOption(crName, namespace, spireEnabled))
 		}
 
-		// Inject volumes (shared-data, authbridge-unified-config, spire volumes if enabled)
+		// Inject volumes (shared-data, authbridge-runtime-config, spire volumes if enabled)
 		for i := range requiredVolumes {
 			if !volumeExists(podSpec.Volumes, requiredVolumes[i].Name) {
 				podSpec.Volumes = append(podSpec.Volumes, requiredVolumes[i])

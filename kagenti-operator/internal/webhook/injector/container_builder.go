@@ -382,7 +382,7 @@ func (b *ContainerBuilder) BuildEnvoyProxyContainerWithSpireOption(spireEnabled 
 			ReadOnly:  true,
 		},
 		{
-			Name:      "authbridge-unified-config",
+			Name:      "authbridge-runtime-config",
 			MountPath: "/etc/authbridge",
 			ReadOnly:  true,
 		},
@@ -459,7 +459,7 @@ func (b *ContainerBuilder) BuildProxySidecarContainerWithPorts(spireEnabled bool
 			MountPath: "/shared",
 		},
 		{
-			Name:      "authbridge-unified-config",
+			Name:      "authbridge-runtime-config",
 			MountPath: "/etc/authbridge",
 			ReadOnly:  true,
 		},
