@@ -11,8 +11,10 @@ rules:
   - namespaces
   - services
   verbs:
+  - create
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - ""

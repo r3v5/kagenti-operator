@@ -676,7 +676,7 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 			return cmName, nil
 		}
 		existing.Data = cm.Data
-		existing.OwnerReferences = cm.OwnerReferences
+		m.setOwnerReferenceFromWorkload(ctx, namespace, crName, existing)
 		if updateErr := m.Client.Update(ctx, existing); updateErr != nil {
 			return "", fmt.Errorf("failed to update ConfigMap %s/%s: %w", namespace, cmName, updateErr)
 		}
