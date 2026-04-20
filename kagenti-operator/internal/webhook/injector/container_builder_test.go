@@ -80,7 +80,7 @@ func TestBuildEnvoyProxyContainer_HasAllRequiredMounts(t *testing.T) {
 		"envoy-config":              "/etc/envoy",
 		"shared-data":               "/shared",
 		"svid-output":               "/opt",
-		"authbridge-unified-config": "/etc/authbridge",
+		"authbridge-runtime-config": "/etc/authbridge",
 	}
 
 	mountsByName := make(map[string]string)

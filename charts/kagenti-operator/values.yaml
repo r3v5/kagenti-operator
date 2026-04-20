@@ -139,7 +139,8 @@ featureGates:
 defaults:
   # Container images with version tags
   images:
-    envoyProxy: ghcr.io/kagenti/kagenti-extensions/envoy-with-processor:latest
+    envoyProxy: ghcr.io/kagenti/kagenti-extensions/authbridge-envoy:latest
+    authbridgeLight: ghcr.io/kagenti/kagenti-extensions/authbridge-light:latest
     proxyInit: ghcr.io/kagenti/kagenti-extensions/proxy-init:latest
     spiffeHelper: ghcr.io/kagenti/kagenti-extensions/spiffe-helper:latest
     clientRegistration: ghcr.io/kagenti/kagenti-extensions/client-registration:latest

@@ -807,8 +807,8 @@ spec:
 
 // --- AuthBridge Injection E2E fixtures ---
 
-// authBridgeConfigMapFixture returns YAML for the 3 ConfigMaps required by
-// the auth bridge webhook: authbridge-config, spiffe-helper-config, envoy-config.
+// authBridgeConfigMapFixture returns YAML for the 4 ConfigMaps required by
+// the auth bridge webhook: authbridge-config, authbridge-runtime-config, spiffe-helper-config, envoy-config.
 // Only the mandatory keys are set (ISSUER, KEYCLOAK_URL, KEYCLOAK_REALM, TOKEN_URL,
 // DEFAULT_OUTBOUND_POLICY). The operator reads additional optional keys
 // (EXPECTED_AUDIENCE, TARGET_AUDIENCE, SPIRE_ENABLED, etc.) which default to empty.
@@ -901,7 +901,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: authbridge-unified-config
+  name: authbridge-runtime-config
   namespace: ` + authBridgeTestNamespace + `
 data:
   config.yaml: |
