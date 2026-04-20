@@ -21,7 +21,7 @@ import (
 )
 
 func TestBuildResolvedVolumes_SpireDisabled(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "")
+	volumes := BuildResolvedVolumes(false, "", "")
 
 	// Should have: shared-data, envoy-config, authproxy-routes, authbridge-runtime-config
 	if len(volumes) != 4 {
@@ -48,7 +48,7 @@ func TestBuildResolvedVolumes_SpireDisabled(t *testing.T) {
 }
 
 func TestBuildResolvedVolumes_SpireEnabled(t *testing.T) {
-	volumes := BuildResolvedVolumes(true, "")
+	volumes := BuildResolvedVolumes(true, "", "")
 
 	// Should have: shared-data, spire-agent-socket, spiffe-helper-config, svid-output, envoy-config, authproxy-routes, authbridge-runtime-config
 	if len(volumes) != 7 {
@@ -68,7 +68,7 @@ func TestBuildResolvedVolumes_SpireEnabled(t *testing.T) {
 }
 
 func TestBuildResolvedVolumes_CustomEnvoyConfigMapName(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "my-custom-envoy")
+	volumes := BuildResolvedVolumes(false, "my-custom-envoy", "")
 
 	var envoyVolume *string
 	for _, v := range volumes {
@@ -87,7 +87,7 @@ func TestBuildResolvedVolumes_CustomEnvoyConfigMapName(t *testing.T) {
 }
 
 func TestBuildResolvedVolumes_DefaultEnvoyConfigMapName(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "")
+	volumes := BuildResolvedVolumes(false, "", "")
 
 	for _, v := range volumes {
 		if v.Name == "envoy-config" {
@@ -99,4 +99,45 @@ func TestBuildResolvedVolumes_DefaultEnvoyConfigMapName(t *testing.T) {
 		}
 	}
 	t.Fatal("envoy-config volume not found")
+}
+
+func TestBuildResolvedVolumes_CustomAuthBridgeConfigMapName(t *testing.T) {
+	volumes := BuildResolvedVolumes(false, "", "authbridge-config-weather-service")
+
+	for _, v := range volumes {
+		if v.Name == "authbridge-runtime-config" {
+			name := v.VolumeSource.ConfigMap.LocalObjectReference.Name
+			if name != "authbridge-config-weather-service" {
+				t.Errorf("authbridge-runtime-config ConfigMap name = %q, want %q", name, "authbridge-config-weather-service")
+			}
+			return
+		}
+	}
+	t.Fatal("authbridge-runtime-config volume not found")
+}
+
+func TestOverrideAuthBridgeConfigMapInVolumes(t *testing.T) {
+	original := BuildRequiredVolumes()
+	overridden := overrideAuthBridgeConfigMapInVolumes(original, "authbridge-config-my-agent")
+
+	// Original should be unchanged
+	for _, v := range original {
+		if v.Name == "authbridge-runtime-config" && v.ConfigMap != nil {
+			if v.ConfigMap.LocalObjectReference.Name != AuthBridgeRuntimeConfigMapName {
+				t.Errorf("original was mutated: got %q", v.ConfigMap.LocalObjectReference.Name)
+			}
+		}
+	}
+
+	// Overridden should have the new name
+	for _, v := range overridden {
+		if v.Name == "authbridge-runtime-config" && v.ConfigMap != nil {
+			if v.ConfigMap.LocalObjectReference.Name != "authbridge-config-my-agent" {
+				t.Errorf("override failed: got %q, want %q",
+					v.ConfigMap.LocalObjectReference.Name, "authbridge-config-my-agent")
+			}
+			return
+		}
+	}
+	t.Fatal("authbridge-runtime-config volume not found in overridden volumes")
 }

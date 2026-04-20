@@ -142,10 +142,14 @@ func BuildRequiredVolumesNoSpire() []corev1.Volume {
 // BuildResolvedVolumes creates volumes using resolved config values.
 // When a resolved envoy config name is provided, the envoy-config volume
 // references that ConfigMap instead of the default "envoy-config" one.
-// This enables per-workload envoy configs created at admission time.
-func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName string) []corev1.Volume {
+// When authbridgeConfigMapName is non-empty, the authbridge-runtime-config
+// volume references that per-agent ConfigMap instead of the shared one.
+func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName, authbridgeConfigMapName string) []corev1.Volume {
 	if envoyConfigMapName == "" {
 		envoyConfigMapName = EnvoyConfigMapName
+	}
+	if authbridgeConfigMapName == "" {
+		authbridgeConfigMapName = AuthBridgeRuntimeConfigMapName
 	}
 
 	volumes := []corev1.Volume{
@@ -215,7 +219,7 @@ func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName string) []corev1
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "authbridge-runtime-config",
+						Name: authbridgeConfigMapName,
 					},
 					Optional: ptr.To(true),
 				},
@@ -224,4 +228,21 @@ func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName string) []corev1
 	)
 
 	return volumes
+}
+
+// overrideAuthBridgeConfigMapInVolumes returns a copy of the volume list with
+// the authbridge-runtime-config volume pointing at the given ConfigMap name.
+// This is used to redirect the volume mount to a per-agent ConfigMap.
+func overrideAuthBridgeConfigMapInVolumes(volumes []corev1.Volume, cmName string) []corev1.Volume {
+	result := make([]corev1.Volume, len(volumes))
+	copy(result, volumes)
+	for i := range result {
+		if result[i].Name == "authbridge-runtime-config" && result[i].ConfigMap != nil {
+			// Deep copy the ConfigMapVolumeSource to avoid mutating the original
+			cmCopy := *result[i].ConfigMap
+			cmCopy.LocalObjectReference.Name = cmName
+			result[i].ConfigMap = &cmCopy
+		}
+	}
+	return result
 }

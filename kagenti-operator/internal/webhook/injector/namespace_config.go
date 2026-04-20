@@ -28,11 +28,12 @@ var nsConfigLog = logf.Log.WithName("namespace-config")
 
 // Well-known ConfigMap/Secret names in the target namespace.
 const (
-	AuthBridgeConfigMapName      = "authbridge-config"
-	KeycloakAdminSecretName      = "keycloak-admin-secret"
-	SpiffeHelperConfigMapName    = "spiffe-helper-config"
-	EnvoyConfigMapName           = "envoy-config"
-	AuthproxyRoutesConfigMapName = "authproxy-routes"
+	AuthBridgeConfigMapName        = "authbridge-config"
+	AuthBridgeRuntimeConfigMapName = "authbridge-runtime-config"
+	KeycloakAdminSecretName        = "keycloak-admin-secret"
+	SpiffeHelperConfigMapName      = "spiffe-helper-config"
+	EnvoyConfigMapName             = "envoy-config"
+	AuthproxyRoutesConfigMapName   = "authproxy-routes"
 )
 
 // NamespaceConfig holds resolved values from namespace ConfigMaps/Secrets.
@@ -60,6 +61,9 @@ type NamespaceConfig struct {
 
 	// From "authproxy-routes" ConfigMap
 	AuthproxyRoutesYAML string // raw routes.yaml content
+
+	// From "authbridge-runtime-config" ConfigMap
+	AuthBridgeRuntimeYAML string // raw config.yaml for unified authbridge binary
 }
 
 // ReadNamespaceConfig reads the well-known ConfigMaps/Secrets from the target
@@ -110,6 +114,13 @@ func ReadNamespaceConfig(ctx context.Context, c client.Reader, namespace string)
 		nsConfigLog.V(1).Info("ConfigMap not found", "name", AuthproxyRoutesConfigMapName, "namespace", namespace, "error", err)
 	} else {
 		cfg.AuthproxyRoutesYAML = cm.Data["routes.yaml"]
+	}
+
+	// Read "authbridge-runtime-config" ConfigMap (YAML config for unified authbridge binary)
+	if cm, err := getConfigMap(ctx, c, namespace, AuthBridgeRuntimeConfigMapName); err != nil {
+		nsConfigLog.V(1).Info("ConfigMap not found", "name", AuthBridgeRuntimeConfigMapName, "namespace", namespace, "error", err)
+	} else {
+		cfg.AuthBridgeRuntimeYAML = cm.Data["config.yaml"]
 	}
 
 	return cfg, nil

@@ -51,6 +51,9 @@ type ResolvedConfig struct {
 	EnvoyYAML           string // empty = use template
 	AuthproxyRoutesYAML string
 
+	// AuthBridge runtime config — from namespace "authbridge-runtime-config" ConfigMap
+	AuthBridgeRuntimeYAML string // raw config.yaml (base for per-agent ConfigMap)
+
 	// Observability — from AgentRuntime .spec.trace (optional)
 	TraceEndpoint     string
 	TraceProtocol     string   // "grpc" or "http"
@@ -89,6 +92,7 @@ func ResolveConfig(platform *config.PlatformConfig, ns *NamespaceConfig, ar *Age
 		SpiffeHelperConf:           ns.SpiffeHelperConf,
 		EnvoyYAML:                  ns.EnvoyYAML,
 		AuthproxyRoutesYAML:        ns.AuthproxyRoutesYAML,
+		AuthBridgeRuntimeYAML:      ns.AuthBridgeRuntimeYAML,
 	}
 
 	// Apply AgentRuntime overrides (highest precedence)
