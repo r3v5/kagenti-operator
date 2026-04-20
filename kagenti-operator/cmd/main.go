@@ -415,6 +415,7 @@ func main() {
 	if authBridgeWebhooksEnabled() {
 		podMutator := injector.NewPodMutator(
 			mgr.GetClient(),
+			mgr.GetScheme(),
 			enableClientRegistration,
 			configLoader.Get,
 			featureGateLoader.Get,

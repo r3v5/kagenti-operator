@@ -22,10 +22,13 @@ import (
 	"strings"
 
 	"github.com/kagenti/operator/internal/webhook/config"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/yaml"
 )
@@ -76,6 +79,7 @@ const (
 
 type PodMutator struct {
 	Client                   client.Client
+	Scheme                   *runtime.Scheme
 	EnableClientRegistration bool
 	// Getter functions for hot-reloadable config (used by precedence evaluator)
 	GetPlatformConfig func() *config.PlatformConfig
@@ -84,12 +88,14 @@ type PodMutator struct {
 
 func NewPodMutator(
 	client client.Client,
+	scheme *runtime.Scheme,
 	enableClientRegistration bool,
 	getPlatformConfig func() *config.PlatformConfig,
 	getFeatureGates func() *config.FeatureGates,
 ) *PodMutator {
 	return &PodMutator{
 		Client:                   client,
+		Scheme:                   scheme,
 		EnableClientRegistration: enableClientRegistration,
 		GetPlatformConfig:        getPlatformConfig,
 		GetFeatureGates:          getFeatureGates,
@@ -648,6 +654,10 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 		},
 	}
 
+	// Set OwnerReference to the owning Deployment or StatefulSet so the
+	// ConfigMap is garbage-collected when the workload is deleted.
+	m.setOwnerReferenceFromWorkload(ctx, namespace, crName, cm)
+
 	existing := &corev1.ConfigMap{}
 	if getErr := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: cmName}, existing); getErr != nil {
 		if !apierrors.IsNotFound(getErr) {
@@ -666,6 +676,7 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 			return cmName, nil
 		}
 		existing.Data = cm.Data
+		existing.OwnerReferences = cm.OwnerReferences
 		if updateErr := m.Client.Update(ctx, existing); updateErr != nil {
 			return "", fmt.Errorf("failed to update ConfigMap %s/%s: %w", namespace, cmName, updateErr)
 		}
@@ -673,6 +684,38 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 	}
 
 	return cmName, nil
+}
+
+// setOwnerReferenceFromWorkload looks up the Deployment or StatefulSet that
+// owns the pod being created and sets it as an OwnerReference on the ConfigMap.
+// This enables garbage collection when the workload is deleted.
+// Best-effort: if the owner cannot be found, the ConfigMap is created without
+// an OwnerReference (the managedByLabel still identifies it for manual cleanup).
+func (m *PodMutator) setOwnerReferenceFromWorkload(ctx context.Context, namespace, crName string, cm *corev1.ConfigMap) {
+	if m.Scheme == nil {
+		return
+	}
+
+	// Try Deployment first (most common)
+	deploy := &appsv1.Deployment{}
+	if err := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: crName}, deploy); err == nil {
+		if refErr := controllerutil.SetOwnerReference(deploy, cm, m.Scheme); refErr != nil {
+			mutatorLog.V(1).Info("Failed to set OwnerReference from Deployment", "error", refErr)
+		}
+		return
+	}
+
+	// Try StatefulSet
+	sts := &appsv1.StatefulSet{}
+	if err := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: crName}, sts); err == nil {
+		if refErr := controllerutil.SetOwnerReference(sts, cm, m.Scheme); refErr != nil {
+			mutatorLog.V(1).Info("Failed to set OwnerReference from StatefulSet", "error", refErr)
+		}
+		return
+	}
+
+	mutatorLog.V(1).Info("Could not find owner workload for per-agent ConfigMap, skipping OwnerReference",
+		"namespace", namespace, "crName", crName)
 }
 
 func containerExists(containers []corev1.Container, name string) bool {
