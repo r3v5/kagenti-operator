@@ -237,10 +237,10 @@ func overrideAuthBridgeConfigMapInVolumes(volumes []corev1.Volume, cmName string
 	result := make([]corev1.Volume, len(volumes))
 	copy(result, volumes)
 	for i := range result {
-		if result[i].Name == "authbridge-runtime-config" && result[i].ConfigMap != nil {
+		if result[i].Name == AuthBridgeRuntimeConfigMapName && result[i].ConfigMap != nil {
 			// Deep copy the ConfigMapVolumeSource to avoid mutating the original
 			cmCopy := *result[i].ConfigMap
-			cmCopy.LocalObjectReference.Name = cmName
+			cmCopy.Name = cmName
 			result[i].ConfigMap = &cmCopy
 		}
 	}

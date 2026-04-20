@@ -105,8 +105,8 @@ func TestBuildResolvedVolumes_CustomAuthBridgeConfigMapName(t *testing.T) {
 	volumes := BuildResolvedVolumes(false, "", "authbridge-config-weather-service")
 
 	for _, v := range volumes {
-		if v.Name == "authbridge-runtime-config" {
-			name := v.VolumeSource.ConfigMap.LocalObjectReference.Name
+		if v.Name == AuthBridgeRuntimeConfigMapName {
+			name := v.ConfigMap.Name
 			if name != "authbridge-config-weather-service" {
 				t.Errorf("authbridge-runtime-config ConfigMap name = %q, want %q", name, "authbridge-config-weather-service")
 			}
@@ -122,19 +122,19 @@ func TestOverrideAuthBridgeConfigMapInVolumes(t *testing.T) {
 
 	// Original should be unchanged
 	for _, v := range original {
-		if v.Name == "authbridge-runtime-config" && v.ConfigMap != nil {
-			if v.ConfigMap.LocalObjectReference.Name != AuthBridgeRuntimeConfigMapName {
-				t.Errorf("original was mutated: got %q", v.ConfigMap.LocalObjectReference.Name)
+		if v.Name == AuthBridgeRuntimeConfigMapName && v.ConfigMap != nil {
+			if v.ConfigMap.Name != AuthBridgeRuntimeConfigMapName {
+				t.Errorf("original was mutated: got %q", v.ConfigMap.Name)
 			}
 		}
 	}
 
 	// Overridden should have the new name
 	for _, v := range overridden {
-		if v.Name == "authbridge-runtime-config" && v.ConfigMap != nil {
-			if v.ConfigMap.LocalObjectReference.Name != "authbridge-config-my-agent" {
+		if v.Name == AuthBridgeRuntimeConfigMapName && v.ConfigMap != nil {
+			if v.ConfigMap.Name != "authbridge-config-my-agent" {
 				t.Errorf("override failed: got %q, want %q",
-					v.ConfigMap.LocalObjectReference.Name, "authbridge-config-my-agent")
+					v.ConfigMap.Name, "authbridge-config-my-agent")
 			}
 			return
 		}
