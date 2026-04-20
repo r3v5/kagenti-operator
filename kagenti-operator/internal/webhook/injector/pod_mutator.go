@@ -642,8 +642,13 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 		return "", fmt.Errorf("failed to marshal per-agent config for %s/%s: %w", namespace, crName, err)
 	}
 
-	// Create or update the ConfigMap
+	// Server-side apply: atomic create-or-update in a single API call.
+	// No race condition — concurrent pod admissions safely converge.
 	cm := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cmName,
 			Namespace: namespace,
@@ -660,36 +665,10 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 	// ConfigMap is garbage-collected when the workload is deleted.
 	m.setOwnerReferenceFromWorkload(ctx, namespace, crName, cm)
 
-	existing := &corev1.ConfigMap{}
-	if getErr := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: cmName}, existing); getErr != nil {
-		if !apierrors.IsNotFound(getErr) {
-			return "", fmt.Errorf("failed to check ConfigMap %s/%s: %w", namespace, cmName, getErr)
-		}
-		// Does not exist — create
-		if createErr := m.Client.Create(ctx, cm); createErr != nil {
-			if apierrors.IsAlreadyExists(createErr) {
-				// Race: another pod's admission created it between our Get and Create.
-				mutatorLog.Info("Per-agent ConfigMap created by concurrent admission", "namespace", namespace, "name", cmName)
-			} else {
-				return "", fmt.Errorf("failed to create ConfigMap %s/%s: %w", namespace, cmName, createErr)
-			}
-		} else {
-			mutatorLog.Info("Created per-agent ConfigMap", "namespace", namespace, "name", cmName, "mode", mode)
-		}
-	} else {
-		// Exists — update if managed by us
-		if existing.Labels[managedByLabel] != managedByValue {
-			mutatorLog.Info("WARNING: per-agent ConfigMap exists but is not managed by webhook, skipping update",
-				"namespace", namespace, "name", cmName)
-			return cmName, nil
-		}
-		existing.Data = cm.Data
-		m.setOwnerReferenceFromWorkload(ctx, namespace, crName, existing)
-		if updateErr := m.Client.Update(ctx, existing); updateErr != nil {
-			return "", fmt.Errorf("failed to update ConfigMap %s/%s: %w", namespace, cmName, updateErr)
-		}
-		mutatorLog.Info("Updated per-agent ConfigMap", "namespace", namespace, "name", cmName, "mode", mode)
+	if err := m.Client.Patch(ctx, cm, client.Apply, client.FieldOwner("kagenti-webhook"), client.ForceOwnership); err != nil {
+		return "", fmt.Errorf("failed to apply per-agent ConfigMap %s/%s: %w", namespace, cmName, err)
 	}
+	mutatorLog.Info("Applied per-agent ConfigMap", "namespace", namespace, "name", cmName, "mode", mode)
 
 	return cmName, nil
 }

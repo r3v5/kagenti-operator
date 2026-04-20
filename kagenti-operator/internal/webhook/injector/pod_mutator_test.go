@@ -1239,7 +1239,9 @@ func TestEnsurePerAgentConfigMap_ExistingCM_OwnedByWebhook_Updated(t *testing.T)
 	}
 }
 
-func TestEnsurePerAgentConfigMap_ExistingCM_NotOwnedByWebhook_Skipped(t *testing.T) {
+func TestEnsurePerAgentConfigMap_ExistingCM_OverwrittenBySSA(t *testing.T) {
+	// Server-side apply with ForceOwnership overwrites regardless of
+	// previous ownership — the webhook always converges to desired state.
 	existingCM := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "authbridge-config-my-agent",
@@ -1252,7 +1254,7 @@ func TestEnsurePerAgentConfigMap_ExistingCM_NotOwnedByWebhook_Skipped(t *testing
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
-		ModeEnvoySidecar, "", &NamespaceConfig{}, nil)
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1260,11 +1262,11 @@ func TestEnsurePerAgentConfigMap_ExistingCM_NotOwnedByWebhook_Skipped(t *testing
 		t.Errorf("cmName = %q, want authbridge-config-my-agent", cmName)
 	}
 
-	// Data should NOT be updated
+	// SSA overwrites — mode should be updated
 	cm := fetchConfigMap(t, m, "team1", "authbridge-config-my-agent")
 	cfg := parseConfigYAML(t, cm)
-	if cfg["mode"] != "user-managed" {
-		t.Errorf("mode = %v, should be unchanged (user-managed)", cfg["mode"])
+	if cfg["mode"] != ModeEnvoySidecar {
+		t.Errorf("mode = %v, want %s (SSA should overwrite)", cfg["mode"], ModeEnvoySidecar)
 	}
 }
 
