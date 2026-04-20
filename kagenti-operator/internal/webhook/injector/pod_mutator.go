@@ -418,15 +418,17 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	// Envoy-sidecar mode (default)
 	// ========================================
 
-	// Create per-agent ConfigMap for envoy-sidecar mode (no listener overrides)
-	perAgentCMName, err := m.ensurePerAgentConfigMap(ctx, namespace, crName,
-		ModeEnvoySidecar, nsConfig.AuthBridgeRuntimeYAML, nsConfig, nil)
-	if err != nil {
-		return false, fmt.Errorf("envoy-sidecar per-agent ConfigMap: %w", err)
+	// Create per-agent ConfigMap for envoy-sidecar mode (no listener overrides).
+	// Skip when combinedSidecar is enabled — that container uses env vars directly
+	// and does not mount authbridge-runtime-config.
+	if !currentGates.CombinedSidecar {
+		perAgentCMName, err := m.ensurePerAgentConfigMap(ctx, namespace, crName,
+			ModeEnvoySidecar, nsConfig.AuthBridgeRuntimeYAML, nsConfig, nil)
+		if err != nil {
+			return false, fmt.Errorf("envoy-sidecar per-agent ConfigMap: %w", err)
+		}
+		requiredVolumes = overrideAuthBridgeConfigMapInVolumes(requiredVolumes, perAgentCMName)
 	}
-
-	// Override authbridge volume to point at per-agent ConfigMap
-	requiredVolumes = overrideAuthBridgeConfigMapInVolumes(requiredVolumes, perAgentCMName)
 
 	// Conditionally inject sidecars based on precedence decisions.
 	// Two modes controlled by the combinedSidecar feature gate:
@@ -587,20 +589,18 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 			cfg["outbound"] = outbound
 		}
 	}
-	if cfg["identity"] == nil && nsConfig != nil {
-		identity := map[string]interface{}{}
-		authType := nsConfig.ClientAuthType
-		if authType == "federated-jwt" {
+	if cfg["identity"] == nil && nsConfig != nil && nsConfig.ClientAuthType != "" {
+		identity := map[string]interface{}{
+			"client_id_file":     "/shared/client-id.txt",
+			"client_secret_file": "/shared/client-secret.txt",
+		}
+		if nsConfig.ClientAuthType == "federated-jwt" {
 			identity["type"] = "spiffe"
 			identity["jwt_svid_path"] = "/opt/jwt_svid.token"
-		} else if authType != "" {
-			identity["type"] = authType
+		} else {
+			identity["type"] = nsConfig.ClientAuthType
 		}
-		identity["client_id_file"] = "/shared/client-id.txt"
-		identity["client_secret_file"] = "/shared/client-secret.txt"
-		if len(identity) > 0 {
-			cfg["identity"] = identity
-		}
+		cfg["identity"] = identity
 	}
 	if cfg["bypass"] == nil {
 		cfg["bypass"] = map[string]interface{}{
