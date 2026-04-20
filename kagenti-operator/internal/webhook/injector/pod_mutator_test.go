@@ -58,6 +58,7 @@ func newTestMutator(objs ...client.Object) *PodMutator {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 	return &PodMutator{
 		Client:                   fakeClient,
+		APIReader:                fakeClient,
 		Scheme:                   scheme,
 		EnableClientRegistration: true,
 		GetPlatformConfig:        config.CompiledDefaults,

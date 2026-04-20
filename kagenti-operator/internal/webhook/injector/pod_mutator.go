@@ -80,6 +80,7 @@ const (
 
 type PodMutator struct {
 	Client                   client.Client
+	APIReader                client.Reader // uncached reader for cross-namespace ConfigMap reads
 	Scheme                   *runtime.Scheme
 	EnableClientRegistration bool
 	// Getter functions for hot-reloadable config (used by precedence evaluator)
@@ -88,14 +89,16 @@ type PodMutator struct {
 }
 
 func NewPodMutator(
-	client client.Client,
+	c client.Client,
+	apiReader client.Reader,
 	scheme *runtime.Scheme,
 	enableClientRegistration bool,
 	getPlatformConfig func() *config.PlatformConfig,
 	getFeatureGates func() *config.FeatureGates,
 ) *PodMutator {
 	return &PodMutator{
-		Client:                   client,
+		Client:                   c,
+		APIReader:                apiReader,
 		Scheme:                   scheme,
 		EnableClientRegistration: enableClientRegistration,
 		GetPlatformConfig:        getPlatformConfig,
@@ -228,7 +231,10 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 
 	// Always read namespace config — needed for per-agent ConfigMap generation
 	// regardless of the per-workload config resolution feature gate.
-	nsConfig, nsConfigErr := ReadNamespaceConfig(ctx, m.Client, namespace)
+	// Use the uncached APIReader so ConfigMaps in agent namespaces (which may
+	// not be in the manager's cache scope) are readable.
+	reader := m.apiReader()
+	nsConfig, nsConfigErr := ReadNamespaceConfig(ctx, reader, namespace)
 	if nsConfigErr != nil {
 		mutatorLog.Error(nsConfigErr, "failed to read namespace config, using empty defaults",
 			"namespace", namespace)
@@ -541,6 +547,16 @@ func (m *PodMutator) ensureServiceAccount(ctx context.Context, namespace, name s
 	}
 	mutatorLog.Info("Created ServiceAccount", "namespace", namespace, "name", name)
 	return nil
+}
+
+// apiReader returns the uncached API reader if available, otherwise falls back
+// to the cached client. This ensures ConfigMap reads work in namespaces that
+// are outside the manager's cache scope.
+func (m *PodMutator) apiReader() client.Reader {
+	if m.APIReader != nil {
+		return m.APIReader
+	}
+	return m.Client
 }
 
 // perAgentConfigMapName returns the ConfigMap name for a specific agent's authbridge config.
