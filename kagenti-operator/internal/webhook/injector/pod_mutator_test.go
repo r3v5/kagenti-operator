@@ -964,3 +964,67 @@ func TestSetOrAddEnv_AddsNew(t *testing.T) {
 		t.Errorf("expected 2 env vars, got %d", len(c.Env))
 	}
 }
+
+func TestInjectAuthBridge_ProxySidecarMode_NoPorts_UsesDefault(t *testing.T) {
+	m := newTestMutator()
+	ctx := context.Background()
+
+	// Agent container with no ports — should use default 8000
+	podSpec := &corev1.PodSpec{
+		ServiceAccountName: "my-agent",
+		Containers: []corev1.Container{
+			{Name: "agent", Image: "my-agent:latest"},
+		},
+	}
+	labels := map[string]string{
+		KagentiTypeLabel: KagentiTypeAgent,
+	}
+	annotations := map[string]string{
+		AnnotationAuthBridgeMode: ModeProxySidecar,
+	}
+
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, annotations)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mutated {
+		t.Fatal("expected mutation")
+	}
+
+	// Reverse proxy should use default port 8000
+	for _, c := range podSpec.Containers {
+		if c.Name == AuthBridgeProxyContainerName {
+			for _, p := range c.Ports {
+				if p.Name == "reverse-proxy" && p.ContainerPort != 8000 {
+					t.Errorf("reverse-proxy port = %d, want 8000 (default)", p.ContainerPort)
+				}
+			}
+		}
+	}
+
+	// Agent should NOT have PORT env var patched (no ports to move)
+	for _, c := range podSpec.Containers {
+		if c.Name == "agent" {
+			for _, env := range c.Env {
+				if env.Name == "PORT" {
+					t.Error("PORT env var should not be set when agent has no ports")
+				}
+			}
+		}
+	}
+
+	// HTTP_PROXY should still be injected
+	httpProxyFound := false
+	for _, c := range podSpec.Containers {
+		if c.Name == "agent" {
+			for _, env := range c.Env {
+				if env.Name == "HTTP_PROXY" {
+					httpProxyFound = true
+				}
+			}
+		}
+	}
+	if !httpProxyFound {
+		t.Error("HTTP_PROXY should be injected even when agent has no ports")
+	}
+}
