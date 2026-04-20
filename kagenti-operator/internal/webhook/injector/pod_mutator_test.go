@@ -1156,7 +1156,7 @@ bypass:
 	}
 
 	identity, _ := cfg["identity"].(map[string]interface{})
-	if identity["type"] != "spiffe" {
+	if identity["type"] != IdentityTypeSpiffe {
 		t.Errorf("identity.type = %v, should be preserved from base YAML", identity["type"])
 	}
 
@@ -1366,7 +1366,7 @@ func TestEnsurePerAgentConfigMap_FederatedJWT_MapsToSpiffe(t *testing.T) {
 	if identity == nil {
 		t.Fatal("expected identity section")
 	}
-	if identity["type"] != "spiffe" {
+	if identity["type"] != IdentityTypeSpiffe {
 		t.Errorf("identity.type = %v, want spiffe (federated-jwt should map to spiffe)", identity["type"])
 	}
 	if identity["jwt_svid_path"] != "/opt/jwt_svid.token" {

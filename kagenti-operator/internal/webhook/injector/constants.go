@@ -23,4 +23,8 @@ const (
 
 	// Container name for proxy-sidecar mode
 	AuthBridgeProxyContainerName = "authbridge-proxy"
+
+	// Identity type constants
+	IdentityTypeSpiffe       = "spiffe"
+	ClientAuthTypeFederatedJWT = "federated-jwt"
 )

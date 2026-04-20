@@ -619,8 +619,8 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 			"client_id_file":     "/shared/client-id.txt",
 			"client_secret_file": "/shared/client-secret.txt",
 		}
-		if nsConfig.ClientAuthType == "federated-jwt" {
-			identity["type"] = "spiffe"
+		if nsConfig.ClientAuthType == ClientAuthTypeFederatedJWT {
+			identity["type"] = IdentityTypeSpiffe
 			identity["jwt_svid_path"] = "/opt/jwt_svid.token"
 		} else {
 			identity["type"] = nsConfig.ClientAuthType
