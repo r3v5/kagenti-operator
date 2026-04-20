@@ -683,7 +683,9 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 // pod being created and returns an OwnerReference apply configuration.
 // Returns nil if the workload cannot be found (best-effort).
 func (m *PodMutator) buildOwnerReference(ctx context.Context, namespace, crName string) *applyconfigsmetav1.OwnerReferenceApplyConfiguration {
-	// Try Deployment first (most common)
+	// Uses the cached client (not APIReader) because Deployments/StatefulSets
+	// are in the manager's default cache scope, unlike ConfigMaps which need
+	// the uncached APIReader for agent namespaces.
 	deploy := &appsv1.Deployment{}
 	if err := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: crName}, deploy); err == nil {
 		return applyconfigsmetav1.OwnerReference().

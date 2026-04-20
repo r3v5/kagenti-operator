@@ -1341,3 +1341,38 @@ func TestEnsurePerAgentConfigMap_OwnerReference_NoWorkload_Skipped(t *testing.T)
 		t.Errorf("expected no OwnerReference for bare pod, got %+v", cm.OwnerReferences)
 	}
 }
+
+func TestEnsurePerAgentConfigMap_FederatedJWT_MapsToSpiffe(t *testing.T) {
+	m := newTestMutator()
+	ctx := context.Background()
+
+	nsConfig := &NamespaceConfig{
+		Issuer:         "http://keycloak:8080/realms/kagenti",
+		KeycloakURL:    "http://keycloak:8080",
+		KeycloakRealm:  "kagenti",
+		ClientAuthType: "federated-jwt",
+	}
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "spiffe-agent",
+		ModeEnvoySidecar, "", nsConfig, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	cfg := parseConfigYAML(t, cm)
+
+	identity, _ := cfg["identity"].(map[string]interface{})
+	if identity == nil {
+		t.Fatal("expected identity section")
+	}
+	if identity["type"] != "spiffe" {
+		t.Errorf("identity.type = %v, want spiffe (federated-jwt should map to spiffe)", identity["type"])
+	}
+	if identity["jwt_svid_path"] != "/opt/jwt_svid.token" {
+		t.Errorf("identity.jwt_svid_path = %v, want /opt/jwt_svid.token", identity["jwt_svid_path"])
+	}
+	if identity["client_id_file"] != "/shared/client-id.txt" {
+		t.Errorf("identity.client_id_file = %v, want /shared/client-id.txt", identity["client_id_file"])
+	}
+}
