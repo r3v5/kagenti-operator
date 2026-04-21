@@ -246,7 +246,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 		// arOverrides was already read above as a gate check.
 		resolved := ResolveConfig(currentConfig, nsConfig, arOverrides)
 		builder = NewResolvedContainerBuilder(resolved)
-		requiredVolumes = BuildResolvedVolumes(spireEnabled, "", "")
+		requiredVolumes = BuildResolvedVolumes(spireEnabled, "")
 
 		mutatorLog.Info("Using resolved config path",
 			"namespace", namespace, "crName", crName,
@@ -586,7 +586,7 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 	if baseYAML != "" {
 		if err := yaml.Unmarshal([]byte(baseYAML), &cfg); err != nil {
 			mutatorLog.Error(err, "failed to parse authbridge-runtime-config, using empty base",
-				"namespace", namespace, "crName", crName)
+				"namespace", namespace, "crName", crName, "baseYAMLLen", len(baseYAML))
 			cfg = make(map[string]interface{})
 		}
 	}
@@ -688,6 +688,9 @@ func (m *PodMutator) buildOwnerReference(ctx context.Context, namespace, crName 
 	// Uses the cached client (not APIReader) because Deployments/StatefulSets
 	// are in the manager's default cache scope, unlike ConfigMaps which need
 	// the uncached APIReader for agent namespaces.
+	// Note: on the very first pod admission for a new Deployment, the informer
+	// may not have synced yet, producing a ConfigMap without OwnerReference.
+	// SSA re-convergence on subsequent pod admissions will add it.
 	deploy := &appsv1.Deployment{}
 	if err := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: crName}, deploy); err == nil {
 		return applyconfigsmetav1.OwnerReference().

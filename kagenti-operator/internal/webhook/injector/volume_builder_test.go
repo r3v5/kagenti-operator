@@ -21,7 +21,7 @@ import (
 )
 
 func TestBuildResolvedVolumes_SpireDisabled(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "", "")
+	volumes := BuildResolvedVolumes(false, "")
 
 	// Should have: shared-data, envoy-config, authproxy-routes, authbridge-runtime-config
 	if len(volumes) != 4 {
@@ -48,7 +48,7 @@ func TestBuildResolvedVolumes_SpireDisabled(t *testing.T) {
 }
 
 func TestBuildResolvedVolumes_SpireEnabled(t *testing.T) {
-	volumes := BuildResolvedVolumes(true, "", "")
+	volumes := BuildResolvedVolumes(true, "")
 
 	// Should have: shared-data, spire-agent-socket, spiffe-helper-config, svid-output, envoy-config, authproxy-routes, authbridge-runtime-config
 	if len(volumes) != 7 {
@@ -68,7 +68,7 @@ func TestBuildResolvedVolumes_SpireEnabled(t *testing.T) {
 }
 
 func TestBuildResolvedVolumes_CustomEnvoyConfigMapName(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "my-custom-envoy", "")
+	volumes := BuildResolvedVolumes(false, "my-custom-envoy")
 
 	var envoyVolume *string
 	for _, v := range volumes {
@@ -87,7 +87,7 @@ func TestBuildResolvedVolumes_CustomEnvoyConfigMapName(t *testing.T) {
 }
 
 func TestBuildResolvedVolumes_DefaultEnvoyConfigMapName(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "", "")
+	volumes := BuildResolvedVolumes(false, "")
 
 	for _, v := range volumes {
 		if v.Name == "envoy-config" {
@@ -101,14 +101,14 @@ func TestBuildResolvedVolumes_DefaultEnvoyConfigMapName(t *testing.T) {
 	t.Fatal("envoy-config volume not found")
 }
 
-func TestBuildResolvedVolumes_CustomAuthBridgeConfigMapName(t *testing.T) {
-	volumes := BuildResolvedVolumes(false, "", "authbridge-config-weather-service")
+func TestBuildResolvedVolumes_AuthBridgeDefaultsToSharedCM(t *testing.T) {
+	volumes := BuildResolvedVolumes(false, "")
 
 	for _, v := range volumes {
 		if v.Name == AuthBridgeRuntimeConfigMapName {
 			name := v.ConfigMap.Name
-			if name != "authbridge-config-weather-service" {
-				t.Errorf("authbridge-runtime-config ConfigMap name = %q, want %q", name, "authbridge-config-weather-service")
+			if name != AuthBridgeRuntimeConfigMapName {
+				t.Errorf("authbridge-runtime-config ConfigMap name = %q, want %q", name, AuthBridgeRuntimeConfigMapName)
 			}
 			return
 		}

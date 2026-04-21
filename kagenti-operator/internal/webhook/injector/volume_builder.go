@@ -142,14 +142,12 @@ func BuildRequiredVolumesNoSpire() []corev1.Volume {
 // BuildResolvedVolumes creates volumes using resolved config values.
 // When a resolved envoy config name is provided, the envoy-config volume
 // references that ConfigMap instead of the default "envoy-config" one.
-// When authbridgeConfigMapName is non-empty, the authbridge-runtime-config
-// volume references that per-agent ConfigMap instead of the shared one.
-func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName, authbridgeConfigMapName string) []corev1.Volume {
+// The authbridge-runtime-config volume always references the shared namespace
+// ConfigMap; use overrideAuthBridgeConfigMapInVolumes to point it at a
+// per-agent ConfigMap after volume creation.
+func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName string) []corev1.Volume {
 	if envoyConfigMapName == "" {
 		envoyConfigMapName = EnvoyConfigMapName
-	}
-	if authbridgeConfigMapName == "" {
-		authbridgeConfigMapName = AuthBridgeRuntimeConfigMapName
 	}
 
 	volumes := []corev1.Volume{
@@ -219,7 +217,7 @@ func BuildResolvedVolumes(spireEnabled bool, envoyConfigMapName, authbridgeConfi
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: authbridgeConfigMapName,
+						Name: AuthBridgeRuntimeConfigMapName,
 					},
 					Optional: ptr.To(true),
 				},
