@@ -124,7 +124,6 @@ var _ = BeforeSuite(func() {
 	podMutator := injector.NewPodMutator(
 		k8sClient,
 		k8sClient,
-		mgr.GetScheme(),
 		true,
 		func() *config.PlatformConfig { return config.CompiledDefaults() },
 		func() *config.FeatureGates { return config.DefaultFeatureGates() },

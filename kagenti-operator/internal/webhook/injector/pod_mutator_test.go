@@ -59,7 +59,6 @@ func newTestMutator(objs ...client.Object) *PodMutator {
 	return &PodMutator{
 		Client:                   fakeClient,
 		APIReader:                fakeClient,
-		Scheme:                   scheme,
 		EnableClientRegistration: true,
 		GetPlatformConfig:        config.CompiledDefaults,
 		GetFeatureGates:          config.DefaultFeatureGates,

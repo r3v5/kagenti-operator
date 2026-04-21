@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	applyconfigscorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 	applyconfigsmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,7 +80,6 @@ const (
 type PodMutator struct {
 	Client                   client.Client
 	APIReader                client.Reader // uncached reader for cross-namespace ConfigMap reads
-	Scheme                   *runtime.Scheme
 	EnableClientRegistration bool
 	// Getter functions for hot-reloadable config (used by precedence evaluator)
 	GetPlatformConfig func() *config.PlatformConfig
@@ -91,7 +89,6 @@ type PodMutator struct {
 func NewPodMutator(
 	c client.Client,
 	apiReader client.Reader,
-	scheme *runtime.Scheme,
 	enableClientRegistration bool,
 	getPlatformConfig func() *config.PlatformConfig,
 	getFeatureGates func() *config.FeatureGates,
@@ -99,7 +96,6 @@ func NewPodMutator(
 	return &PodMutator{
 		Client:                   c,
 		APIReader:                apiReader,
-		Scheme:                   scheme,
 		EnableClientRegistration: enableClientRegistration,
 		GetPlatformConfig:        getPlatformConfig,
 		GetFeatureGates:          getFeatureGates,

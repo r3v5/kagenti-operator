@@ -416,7 +416,6 @@ func main() {
 		podMutator := injector.NewPodMutator(
 			mgr.GetClient(),
 			mgr.GetAPIReader(),
-			mgr.GetScheme(),
 			enableClientRegistration,
 			configLoader.Get,
 			featureGateLoader.Get,
