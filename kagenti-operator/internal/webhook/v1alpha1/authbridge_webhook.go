@@ -39,7 +39,8 @@ type AuthBridgeWebhook struct {
 }
 
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;create;update
-// +kubebuilder:rbac:groups=core,resources=namespaces;secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 
 // SetupAuthBridgeWebhookWithManager registers the authbridge webhook with the manager
 func SetupAuthBridgeWebhookWithManager(mgr ctrl.Manager, mutator *injector.PodMutator) error {

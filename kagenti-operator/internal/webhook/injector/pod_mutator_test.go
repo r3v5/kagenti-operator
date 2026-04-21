@@ -22,11 +22,14 @@ import (
 
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
 	"github.com/kagenti/operator/internal/webhook/config"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // newAgentRuntime creates a minimal AgentRuntime CR targeting the given workload name.
@@ -50,10 +53,12 @@ func newAgentRuntime(namespace, targetName string) *agentv1alpha1.AgentRuntime {
 func newTestMutator(objs ...client.Object) *PodMutator {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
 	_ = agentv1alpha1.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 	return &PodMutator{
 		Client:                   fakeClient,
+		APIReader:                fakeClient,
 		EnableClientRegistration: true,
 		GetPlatformConfig:        config.CompiledDefaults,
 		GetFeatureGates:          config.DefaultFeatureGates,
@@ -1026,5 +1031,347 @@ func TestInjectAuthBridge_ProxySidecarMode_NoPorts_UsesDefault(t *testing.T) {
 	}
 	if !httpProxyFound {
 		t.Error("HTTP_PROXY should be injected even when agent has no ports")
+	}
+}
+
+// --- ensurePerAgentConfigMap tests ---
+
+// helper to get a ConfigMap from the fake client
+func fetchConfigMap(t *testing.T, m *PodMutator, namespace, name string) *corev1.ConfigMap {
+	t.Helper()
+	cm := &corev1.ConfigMap{}
+	if err := m.Client.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, cm); err != nil {
+		t.Fatalf("failed to get ConfigMap %s/%s: %v", namespace, name, err)
+	}
+	return cm
+}
+
+// helper to parse config.yaml from a ConfigMap into a map
+func parseConfigYAML(t *testing.T, cm *corev1.ConfigMap) map[string]interface{} {
+	t.Helper()
+	raw, ok := cm.Data["config.yaml"]
+	if !ok {
+		t.Fatal("ConfigMap missing config.yaml key")
+	}
+	var cfg map[string]interface{}
+	if err := sigsyaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("failed to parse config.yaml: %v", err)
+	}
+	return cfg
+}
+
+func TestEnsurePerAgentConfigMap_EmptyBaseYAML_FallbackFromNsConfig(t *testing.T) {
+	m := newTestMutator()
+	ctx := context.Background()
+
+	nsConfig := &NamespaceConfig{
+		Issuer:                "http://keycloak:8080/realms/kagenti",
+		KeycloakURL:           "http://keycloak:8080",
+		KeycloakRealm:         "kagenti",
+		DefaultOutboundPolicy: "passthrough",
+		ClientAuthType:        "client-secret",
+	}
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "weather-service",
+		ModeProxySidecar, "", nsConfig, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmName != "authbridge-config-weather-service" {
+		t.Errorf("cmName = %q, want authbridge-config-weather-service", cmName)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	cfg := parseConfigYAML(t, cm)
+
+	if cfg["mode"] != ModeProxySidecar {
+		t.Errorf("mode = %v, want %s", cfg["mode"], ModeProxySidecar)
+	}
+
+	inbound, _ := cfg["inbound"].(map[string]interface{})
+	if inbound == nil || inbound["issuer"] != "http://keycloak:8080/realms/kagenti" {
+		t.Errorf("inbound.issuer = %v, want http://keycloak:8080/realms/kagenti", inbound)
+	}
+
+	outbound, _ := cfg["outbound"].(map[string]interface{})
+	if outbound == nil || outbound["keycloak_url"] != "http://keycloak:8080" {
+		t.Errorf("outbound.keycloak_url = %v, want http://keycloak:8080", outbound)
+	}
+
+	identity, _ := cfg["identity"].(map[string]interface{})
+	if identity == nil || identity["type"] != "client-secret" {
+		t.Errorf("identity.type = %v, want client-secret", identity)
+	}
+
+	if cfg["bypass"] == nil {
+		t.Error("expected default bypass paths")
+	}
+
+	// managedBy label
+	if cm.Labels[managedByLabel] != managedByValue {
+		t.Errorf("managedBy label = %q, want %q", cm.Labels[managedByLabel], managedByValue)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_BaseYAML_PreservesExistingFields(t *testing.T) {
+	m := newTestMutator()
+	ctx := context.Background()
+
+	baseYAML := `
+mode: envoy-sidecar
+inbound:
+  issuer: "http://custom-issuer"
+outbound:
+  keycloak_url: "http://custom-keycloak:8080"
+  keycloak_realm: "custom-realm"
+identity:
+  type: spiffe
+  jwt_svid_path: "/opt/jwt_svid.token"
+  client_id_file: "/shared/client-id.txt"
+  client_secret_file: "/shared/client-secret.txt"
+bypass:
+  inbound_paths:
+    - "/custom-path"
+`
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
+		ModeEnvoySidecar, baseYAML, &NamespaceConfig{}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	cfg := parseConfigYAML(t, cm)
+
+	// Mode overridden
+	if cfg["mode"] != ModeEnvoySidecar {
+		t.Errorf("mode = %v, want %s", cfg["mode"], ModeEnvoySidecar)
+	}
+
+	// Existing fields preserved (not overwritten by fallback)
+	inbound, _ := cfg["inbound"].(map[string]interface{})
+	if inbound["issuer"] != "http://custom-issuer" {
+		t.Errorf("inbound.issuer = %v, should be preserved from base YAML", inbound["issuer"])
+	}
+
+	identity, _ := cfg["identity"].(map[string]interface{})
+	if identity["type"] != IdentityTypeSpiffe {
+		t.Errorf("identity.type = %v, should be preserved from base YAML", identity["type"])
+	}
+
+	bypass, _ := cfg["bypass"].(map[string]interface{})
+	paths, _ := bypass["inbound_paths"].([]interface{})
+	if len(paths) != 1 || paths[0] != "/custom-path" {
+		t.Errorf("bypass paths = %v, should be preserved from base YAML", paths)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_ListenerOverrides_Merged(t *testing.T) {
+	m := newTestMutator()
+	ctx := context.Background()
+
+	baseYAML := `
+mode: envoy-sidecar
+inbound:
+  issuer: "http://issuer"
+outbound:
+  keycloak_url: "http://keycloak:8080"
+  keycloak_realm: "kagenti"
+identity:
+  type: client-secret
+  client_id_file: "/shared/client-id.txt"
+  client_secret_file: "/shared/client-secret.txt"
+`
+
+	overrides := map[string]string{
+		"reverse_proxy_addr":    ":8000",
+		"reverse_proxy_backend": "http://127.0.0.1:8002",
+		"forward_proxy_addr":    ":8081",
+	}
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
+		ModeProxySidecar, baseYAML, &NamespaceConfig{}, overrides)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	cfg := parseConfigYAML(t, cm)
+
+	listener, _ := cfg["listener"].(map[string]interface{})
+	if listener == nil {
+		t.Fatal("expected listener section in config")
+	}
+	if listener["reverse_proxy_addr"] != ":8000" {
+		t.Errorf("reverse_proxy_addr = %v, want :8000", listener["reverse_proxy_addr"])
+	}
+	if listener["reverse_proxy_backend"] != "http://127.0.0.1:8002" {
+		t.Errorf("reverse_proxy_backend = %v, want http://127.0.0.1:8002", listener["reverse_proxy_backend"])
+	}
+	if listener["forward_proxy_addr"] != ":8081" {
+		t.Errorf("forward_proxy_addr = %v, want :8081", listener["forward_proxy_addr"])
+	}
+}
+
+func TestEnsurePerAgentConfigMap_ExistingCM_OwnedByWebhook_Updated(t *testing.T) {
+	existingCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "authbridge-config-my-agent",
+			Namespace: "team1",
+			Labels:    map[string]string{managedByLabel: managedByValue},
+		},
+		Data: map[string]string{"config.yaml": "mode: old-mode\n"},
+	}
+	m := newTestMutator(existingCM)
+	ctx := context.Background()
+
+	_, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", "authbridge-config-my-agent")
+	cfg := parseConfigYAML(t, cm)
+
+	if cfg["mode"] != ModeEnvoySidecar {
+		t.Errorf("mode = %v, want %s (should have been updated)", cfg["mode"], ModeEnvoySidecar)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_ExistingCM_OverwrittenBySSA(t *testing.T) {
+	// Server-side apply with ForceOwnership overwrites regardless of
+	// previous ownership — the webhook always converges to desired state.
+	existingCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "authbridge-config-my-agent",
+			Namespace: "team1",
+			Labels:    map[string]string{"some-other": "label"},
+		},
+		Data: map[string]string{"config.yaml": "mode: user-managed\n"},
+	}
+	m := newTestMutator(existingCM)
+	ctx := context.Background()
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmName != "authbridge-config-my-agent" {
+		t.Errorf("cmName = %q, want authbridge-config-my-agent", cmName)
+	}
+
+	// SSA overwrites — mode should be updated
+	cm := fetchConfigMap(t, m, "team1", "authbridge-config-my-agent")
+	cfg := parseConfigYAML(t, cm)
+	if cfg["mode"] != ModeEnvoySidecar {
+		t.Errorf("mode = %v, want %s (SSA should overwrite)", cfg["mode"], ModeEnvoySidecar)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_OwnerReference_SetFromDeployment(t *testing.T) {
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "weather-service",
+			Namespace: "team1",
+			UID:       types.UID("deploy-uid-123"),
+		},
+	}
+	m := newTestMutator(deploy)
+	ctx := context.Background()
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "weather-service",
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	if len(cm.OwnerReferences) == 0 {
+		t.Fatal("expected OwnerReference on ConfigMap")
+	}
+	ref := cm.OwnerReferences[0]
+	if ref.Kind != "Deployment" || ref.Name != "weather-service" || ref.UID != "deploy-uid-123" {
+		t.Errorf("OwnerReference = %+v, want Deployment/weather-service/deploy-uid-123", ref)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_OwnerReference_SetFromStatefulSet(t *testing.T) {
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-stateful-agent",
+			Namespace: "team1",
+			UID:       types.UID("sts-uid-456"),
+		},
+	}
+	m := newTestMutator(sts)
+	ctx := context.Background()
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-stateful-agent",
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	if len(cm.OwnerReferences) == 0 {
+		t.Fatal("expected OwnerReference on ConfigMap")
+	}
+	ref := cm.OwnerReferences[0]
+	if ref.Kind != "StatefulSet" || ref.Name != "my-stateful-agent" || ref.UID != "sts-uid-456" {
+		t.Errorf("OwnerReference = %+v, want StatefulSet/my-stateful-agent/sts-uid-456", ref)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_OwnerReference_NoWorkload_Skipped(t *testing.T) {
+	// No Deployment or StatefulSet — bare pod
+	m := newTestMutator()
+	ctx := context.Background()
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "bare-pod-agent",
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	if len(cm.OwnerReferences) != 0 {
+		t.Errorf("expected no OwnerReference for bare pod, got %+v", cm.OwnerReferences)
+	}
+}
+
+func TestEnsurePerAgentConfigMap_FederatedJWT_MapsToSpiffe(t *testing.T) {
+	m := newTestMutator()
+	ctx := context.Background()
+
+	nsConfig := &NamespaceConfig{
+		Issuer:         "http://keycloak:8080/realms/kagenti",
+		KeycloakURL:    "http://keycloak:8080",
+		KeycloakRealm:  "kagenti",
+		ClientAuthType: "federated-jwt",
+	}
+
+	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "spiffe-agent",
+		ModeEnvoySidecar, "", nsConfig, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cm := fetchConfigMap(t, m, "team1", cmName)
+	cfg := parseConfigYAML(t, cm)
+
+	identity, _ := cfg["identity"].(map[string]interface{})
+	if identity == nil {
+		t.Fatal("expected identity section")
+	}
+	if identity["type"] != IdentityTypeSpiffe {
+		t.Errorf("identity.type = %v, want spiffe (federated-jwt should map to spiffe)", identity["type"])
+	}
+	if identity["jwt_svid_path"] != "/opt/jwt_svid.token" {
+		t.Errorf("identity.jwt_svid_path = %v, want /opt/jwt_svid.token", identity["jwt_svid_path"])
+	}
+	if identity["client_id_file"] != "/shared/client-id.txt" {
+		t.Errorf("identity.client_id_file = %v, want /shared/client-id.txt", identity["client_id_file"])
 	}
 }

@@ -22,11 +22,15 @@ import (
 	"strings"
 
 	"github.com/kagenti/operator/internal/webhook/config"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	applyconfigscorev1 "k8s.io/client-go/applyconfigurations/core/v1"
+	applyconfigsmetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/yaml"
 )
 
 var mutatorLog = logf.Log.WithName("pod-mutator")
@@ -75,6 +79,7 @@ const (
 
 type PodMutator struct {
 	Client                   client.Client
+	APIReader                client.Reader // uncached reader for cross-namespace ConfigMap reads
 	EnableClientRegistration bool
 	// Getter functions for hot-reloadable config (used by precedence evaluator)
 	GetPlatformConfig func() *config.PlatformConfig
@@ -82,18 +87,22 @@ type PodMutator struct {
 }
 
 func NewPodMutator(
-	client client.Client,
+	c client.Client,
+	apiReader client.Reader,
 	enableClientRegistration bool,
 	getPlatformConfig func() *config.PlatformConfig,
 	getFeatureGates func() *config.FeatureGates,
 ) *PodMutator {
 	return &PodMutator{
-		Client:                   client,
+		Client:                   c,
+		APIReader:                apiReader,
 		EnableClientRegistration: enableClientRegistration,
 		GetPlatformConfig:        getPlatformConfig,
 		GetFeatureGates:          getFeatureGates,
 	}
 }
+
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=create;get;list;patch;update;watch
 
 // InjectAuthBridge evaluates the multi-layer precedence chain and conditionally injects sidecars.
 //
@@ -216,18 +225,20 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	var builder *ContainerBuilder
 	var requiredVolumes []corev1.Volume
 
-	if currentGates.PerWorkloadConfigResolution {
-		// Resolved path: read namespace config and build literal env vars
-		var nsConfig *NamespaceConfig
-		var err error
-		mutatorLog.V(1).Info("reading namespace config per-workload", "namespace", namespace)
-		nsConfig, err = ReadNamespaceConfig(ctx, m.Client, namespace)
-		if err != nil {
-			mutatorLog.Error(err, "failed to read namespace config, using empty defaults",
-				"namespace", namespace)
-			nsConfig = &NamespaceConfig{}
-		}
+	// Always read namespace config — needed for per-agent ConfigMap generation
+	// regardless of the per-workload config resolution feature gate.
+	// Use the uncached APIReader so ConfigMaps in agent namespaces (which may
+	// not be in the manager's cache scope) are readable.
+	reader := m.apiReader()
+	nsConfig, nsConfigErr := ReadNamespaceConfig(ctx, reader, namespace)
+	if nsConfigErr != nil {
+		mutatorLog.Error(nsConfigErr, "failed to read namespace config, using empty defaults",
+			"namespace", namespace)
+		nsConfig = &NamespaceConfig{}
+	}
 
+	if currentGates.PerWorkloadConfigResolution {
+		// Resolved path: build literal env vars from namespace config
 		// arOverrides was already read above as a gate check.
 		resolved := ResolveConfig(currentConfig, nsConfig, arOverrides)
 		builder = NewResolvedContainerBuilder(resolved)
@@ -350,6 +361,18 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 				"forwardProxyPort", forwardProxyPort)
 		}
 
+		// Create per-agent ConfigMap with proxy-sidecar listener addresses
+		perAgentCMName, err := m.ensurePerAgentConfigMap(ctx, namespace, crName,
+			ModeProxySidecar, nsConfig.AuthBridgeRuntimeYAML, nsConfig,
+			map[string]string{
+				"reverse_proxy_addr":    fmt.Sprintf(":%d", originalAgentPort),
+				"reverse_proxy_backend": fmt.Sprintf("http://127.0.0.1:%d", newAgentPort),
+				"forward_proxy_addr":    fmt.Sprintf(":%d", forwardProxyPort),
+			})
+		if err != nil {
+			return false, fmt.Errorf("proxy-sidecar per-agent ConfigMap: %w", err)
+		}
+
 		// Inject authbridge-proxy container listening on the original agent port
 		if !containerExists(podSpec.Containers, AuthBridgeProxyContainerName) {
 			podSpec.Containers = append(podSpec.Containers,
@@ -380,16 +403,20 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 			podSpec.Containers = append(podSpec.Containers, builder.BuildClientRegistrationContainerWithSpireOption(crName, namespace, spireEnabled))
 		}
 
-		// Inject volumes (shared-data, authbridge-runtime-config, spire volumes if enabled)
-		for i := range requiredVolumes {
-			if !volumeExists(podSpec.Volumes, requiredVolumes[i].Name) {
-				podSpec.Volumes = append(podSpec.Volumes, requiredVolumes[i])
+		// Inject volumes — use per-agent ConfigMap name for authbridge config.
+		// requiredVolumes is always set above (resolved or legacy path) before
+		// the mode switch, so it is never nil here.
+		proxyVolumes := overrideAuthBridgeConfigMapInVolumes(requiredVolumes, perAgentCMName)
+		for i := range proxyVolumes {
+			if !volumeExists(podSpec.Volumes, proxyVolumes[i].Name) {
+				podSpec.Volumes = append(podSpec.Volumes, proxyVolumes[i])
 			}
 		}
 
 		mutatorLog.Info("proxy-sidecar mode injection complete",
 			"namespace", namespace, "crName", crName,
 			"image", builder.cfg.Images.AuthBridgeLight,
+			"perAgentConfigMap", perAgentCMName,
 			"reverseProxyPort", originalAgentPort,
 			"agentPort", newAgentPort,
 			"forwardProxyPort", forwardProxyPort)
@@ -403,6 +430,18 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	// ========================================
 	// Envoy-sidecar mode (default)
 	// ========================================
+
+	// Create per-agent ConfigMap for envoy-sidecar mode (no listener overrides).
+	// Skip when combinedSidecar is enabled — that container uses env vars directly
+	// and does not mount authbridge-runtime-config.
+	if !currentGates.CombinedSidecar {
+		perAgentCMName, err := m.ensurePerAgentConfigMap(ctx, namespace, crName,
+			ModeEnvoySidecar, nsConfig.AuthBridgeRuntimeYAML, nsConfig, nil)
+		if err != nil {
+			return false, fmt.Errorf("envoy-sidecar per-agent ConfigMap: %w", err)
+		}
+		requiredVolumes = overrideAuthBridgeConfigMapInVolumes(requiredVolumes, perAgentCMName)
+	}
 
 	// Conditionally inject sidecars based on precedence decisions.
 	// Two modes controlled by the combinedSidecar feature gate:
@@ -505,6 +544,174 @@ func (m *PodMutator) ensureServiceAccount(ctx context.Context, namespace, name s
 		return fmt.Errorf("failed to create ServiceAccount %s/%s: %w", namespace, name, err)
 	}
 	mutatorLog.Info("Created ServiceAccount", "namespace", namespace, "name", name)
+	return nil
+}
+
+// apiReader returns the uncached API reader if available, otherwise falls back
+// to the cached client. This ensures ConfigMap reads work in namespaces that
+// are outside the manager's cache scope.
+func (m *PodMutator) apiReader() client.Reader {
+	if m.APIReader != nil {
+		return m.APIReader
+	}
+	return m.Client
+}
+
+// perAgentConfigMapName returns the ConfigMap name for a specific agent's authbridge config.
+func perAgentConfigMapName(crName string) string {
+	return "authbridge-config-" + crName
+}
+
+// ensurePerAgentConfigMap creates or updates a per-agent ConfigMap that merges the
+// namespace-level authbridge-runtime-config with per-agent overrides (mode, listener
+// addresses). The authbridge sidecar mounts this instead of the shared ConfigMap.
+//
+// If baseYAML is empty (namespace has no authbridge-runtime-config), a minimal config
+// is generated from the NamespaceConfig fields.
+func (m *PodMutator) ensurePerAgentConfigMap(
+	ctx context.Context,
+	namespace, crName, mode string,
+	baseYAML string,
+	nsConfig *NamespaceConfig,
+	listenerOverrides map[string]string,
+) (string, error) {
+	cmName := perAgentConfigMapName(crName)
+
+	// Parse the base YAML into a generic map
+	cfg := make(map[string]interface{})
+	if baseYAML != "" {
+		if err := yaml.Unmarshal([]byte(baseYAML), &cfg); err != nil {
+			mutatorLog.Error(err, "failed to parse authbridge-runtime-config, using empty base",
+				"namespace", namespace, "crName", crName, "baseYAMLLen", len(baseYAML))
+			cfg = make(map[string]interface{})
+		}
+	}
+
+	// If the base was empty or missing key fields, populate from NamespaceConfig
+	if cfg["inbound"] == nil && nsConfig != nil {
+		inbound := map[string]interface{}{}
+		if nsConfig.Issuer != "" {
+			inbound["issuer"] = nsConfig.Issuer
+		}
+		if len(inbound) > 0 {
+			cfg["inbound"] = inbound
+		}
+	}
+	if cfg["outbound"] == nil && nsConfig != nil {
+		outbound := map[string]interface{}{}
+		if nsConfig.KeycloakURL != "" {
+			outbound["keycloak_url"] = nsConfig.KeycloakURL
+		}
+		if nsConfig.KeycloakRealm != "" {
+			outbound["keycloak_realm"] = nsConfig.KeycloakRealm
+		}
+		if nsConfig.DefaultOutboundPolicy != "" {
+			outbound["default_policy"] = nsConfig.DefaultOutboundPolicy
+		}
+		if len(outbound) > 0 {
+			cfg["outbound"] = outbound
+		}
+	}
+	if cfg["identity"] == nil && nsConfig != nil && nsConfig.ClientAuthType != "" {
+		identity := map[string]interface{}{
+			"client_id_file":     "/shared/client-id.txt",
+			"client_secret_file": "/shared/client-secret.txt",
+		}
+		if nsConfig.ClientAuthType == ClientAuthTypeFederatedJWT {
+			identity["type"] = IdentityTypeSpiffe
+			identity["jwt_svid_path"] = "/opt/jwt_svid.token"
+		} else {
+			identity["type"] = nsConfig.ClientAuthType
+		}
+		cfg["identity"] = identity
+	}
+	if cfg["bypass"] == nil {
+		cfg["bypass"] = map[string]interface{}{
+			"inbound_paths": []string{
+				"/.well-known/*",
+				"/healthz",
+				"/readyz",
+				"/livez",
+			},
+		}
+	}
+
+	// Override mode
+	cfg["mode"] = mode
+
+	// Merge listener overrides
+	if len(listenerOverrides) > 0 {
+		listener, _ := cfg["listener"].(map[string]interface{})
+		if listener == nil {
+			listener = make(map[string]interface{})
+		}
+		for k, v := range listenerOverrides {
+			listener[k] = v
+		}
+		cfg["listener"] = listener
+	}
+
+	// Marshal back to YAML
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal per-agent config for %s/%s: %w", namespace, crName, err)
+	}
+
+	// Server-side apply: atomic create-or-update in a single API call.
+	// No race condition — concurrent pod admissions safely converge.
+	cmApply := applyconfigscorev1.ConfigMap(cmName, namespace).
+		WithLabels(map[string]string{managedByLabel: managedByValue}).
+		WithData(map[string]string{"config.yaml": string(data)})
+
+	// Set OwnerReference to the owning Deployment or StatefulSet so the
+	// ConfigMap is garbage-collected when the workload is deleted.
+	if ownerRef := m.buildOwnerReference(ctx, namespace, crName); ownerRef != nil {
+		cmApply = cmApply.WithOwnerReferences(ownerRef)
+	}
+
+	if err := m.Client.Apply(ctx, cmApply, client.FieldOwner("kagenti-webhook"), client.ForceOwnership); err != nil {
+		return "", fmt.Errorf("failed to apply per-agent ConfigMap %s/%s: %w", namespace, cmName, err)
+	}
+	mutatorLog.Info("Applied per-agent ConfigMap", "namespace", namespace, "name", cmName, "mode", mode)
+
+	return cmName, nil
+}
+
+// buildOwnerReference looks up the Deployment or StatefulSet that owns the
+// pod being created and returns an OwnerReference apply configuration.
+// Returns nil if the workload cannot be found (best-effort).
+func (m *PodMutator) buildOwnerReference(ctx context.Context, namespace, crName string) *applyconfigsmetav1.OwnerReferenceApplyConfiguration {
+	// Uses the cached client (not APIReader) because Deployments/StatefulSets
+	// are in the manager's default cache scope, unlike ConfigMaps which need
+	// the uncached APIReader for agent namespaces.
+	// Note: on the very first pod admission for a new Deployment, the informer
+	// may not have synced yet, producing a ConfigMap without OwnerReference.
+	// SSA re-convergence on subsequent pod admissions will add it.
+	deploy := &appsv1.Deployment{}
+	if err := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: crName}, deploy); err == nil {
+		return applyconfigsmetav1.OwnerReference().
+			WithAPIVersion("apps/v1").
+			WithKind("Deployment").
+			WithName(deploy.Name).
+			WithUID(deploy.UID).
+			WithController(true).
+			WithBlockOwnerDeletion(true)
+	}
+
+	// Try StatefulSet
+	sts := &appsv1.StatefulSet{}
+	if err := m.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: crName}, sts); err == nil {
+		return applyconfigsmetav1.OwnerReference().
+			WithAPIVersion("apps/v1").
+			WithKind("StatefulSet").
+			WithName(sts.Name).
+			WithUID(sts.UID).
+			WithController(true).
+			WithBlockOwnerDeletion(true)
+	}
+
+	mutatorLog.V(1).Info("Could not find owner workload for per-agent ConfigMap, skipping OwnerReference",
+		"namespace", namespace, "crName", crName)
 	return nil
 }
 

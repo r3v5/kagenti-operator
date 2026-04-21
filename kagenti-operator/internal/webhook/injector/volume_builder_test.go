@@ -100,3 +100,44 @@ func TestBuildResolvedVolumes_DefaultEnvoyConfigMapName(t *testing.T) {
 	}
 	t.Fatal("envoy-config volume not found")
 }
+
+func TestBuildResolvedVolumes_AuthBridgeDefaultsToSharedCM(t *testing.T) {
+	volumes := BuildResolvedVolumes(false, "")
+
+	for _, v := range volumes {
+		if v.Name == AuthBridgeRuntimeConfigMapName {
+			name := v.ConfigMap.Name
+			if name != AuthBridgeRuntimeConfigMapName {
+				t.Errorf("authbridge-runtime-config ConfigMap name = %q, want %q", name, AuthBridgeRuntimeConfigMapName)
+			}
+			return
+		}
+	}
+	t.Fatal("authbridge-runtime-config volume not found")
+}
+
+func TestOverrideAuthBridgeConfigMapInVolumes(t *testing.T) {
+	original := BuildRequiredVolumes()
+	overridden := overrideAuthBridgeConfigMapInVolumes(original, "authbridge-config-my-agent")
+
+	// Original should be unchanged
+	for _, v := range original {
+		if v.Name == AuthBridgeRuntimeConfigMapName && v.ConfigMap != nil {
+			if v.ConfigMap.Name != AuthBridgeRuntimeConfigMapName {
+				t.Errorf("original was mutated: got %q", v.ConfigMap.Name)
+			}
+		}
+	}
+
+	// Overridden should have the new name
+	for _, v := range overridden {
+		if v.Name == AuthBridgeRuntimeConfigMapName && v.ConfigMap != nil {
+			if v.ConfigMap.Name != "authbridge-config-my-agent" {
+				t.Errorf("override failed: got %q, want %q",
+					v.ConfigMap.Name, "authbridge-config-my-agent")
+			}
+			return
+		}
+	}
+	t.Fatal("authbridge-runtime-config volume not found in overridden volumes")
+}

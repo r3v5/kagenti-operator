@@ -714,9 +714,9 @@ func TestBuildProxySidecarContainer_SpireDisabled(t *testing.T) {
 		t.Errorf("image = %q, want %q", container.Image, config.CompiledDefaults().Images.AuthBridgeLight)
 	}
 
-	// Should have --mode proxy-sidecar --config args
-	if len(container.Args) < 4 || container.Args[0] != "--mode" || container.Args[1] != "proxy-sidecar" {
-		t.Errorf("args = %v, want [--mode proxy-sidecar --config ...]", container.Args)
+	// Should have --config args (mode comes from per-agent ConfigMap, not CLI)
+	if len(container.Args) < 2 || container.Args[0] != "--config" {
+		t.Errorf("args = %v, want [--config /etc/authbridge/config.yaml]", container.Args)
 	}
 
 	// Should have reverse-proxy and forward-proxy ports

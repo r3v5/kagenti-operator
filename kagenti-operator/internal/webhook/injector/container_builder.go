@@ -476,13 +476,7 @@ func (b *ContainerBuilder) BuildProxySidecarContainerWithPorts(spireEnabled bool
 		Image:           b.cfg.Images.AuthBridgeLight,
 		ImagePullPolicy: b.cfg.Images.PullPolicy,
 		Args: []string{
-			"--mode", "proxy-sidecar",
 			"--config", "/etc/authbridge/config.yaml",
-		},
-		Env: []corev1.EnvVar{
-			{Name: "REVERSE_PROXY_ADDR", Value: fmt.Sprintf(":%d", reverseProxyPort)},
-			{Name: "REVERSE_PROXY_BACKEND", Value: fmt.Sprintf("http://127.0.0.1:%d", agentBackendPort)},
-			{Name: "FORWARD_PROXY_ADDR", Value: fmt.Sprintf(":%d", forwardProxyPort)},
 		},
 		Ports: []corev1.ContainerPort{
 			{
