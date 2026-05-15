@@ -24,7 +24,7 @@ func CompiledDefaults() *PlatformConfig {
 			AuthBridgeLite: "ghcr.io/kagenti/kagenti-extensions/authbridge-lite:latest",
 			// proxy-init: iptables init container, used by
 			// envoy-sidecar mode only.
-			ProxyInit: "ghcr.io/kagenti/kagenti-extensions/proxy-init:latest",
+			ProxyInit:  "ghcr.io/kagenti/kagenti-extensions/proxy-init:latest",
 			PullPolicy: corev1.PullIfNotPresent,
 		},
 		Proxy: ProxyConfig{
