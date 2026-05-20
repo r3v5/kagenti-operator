@@ -42,7 +42,7 @@ This scenario demonstrates the complete lifecycle of an AI agent deployment on t
 ### Kagenti Operator
 The Kagenti Operator discovers, indexes, and secures AI agents deployed in Kubernetes. There are two ways to enroll workloads:
 
-1. **AgentRuntime CR (Recommended)** — Create a clean Deployment and an `AgentRuntime` CR pointing to it. The controller applies labels and triggers sidecar injection automatically. Your workload manifests stay free of kagenti-specific labels.
+1. **AgentRuntime CR (Recommended)** — Create a Deployment with a `protocol.kagenti.io/a2a` label and an `AgentRuntime` CR pointing to it. The controller applies `kagenti.io/type` labels and triggers sidecar injection automatically. The protocol label enables automatic AgentCard creation for agent discovery.
 2. **Manual labels** — Add the `kagenti.io/type: agent` label directly to your Deployment or StatefulSet. This is simpler for quick tests but does not provide identity or observability configuration.
 
 > **Note:** The `Agent` Custom Resource is deprecated and will be removed in a future release.
@@ -51,9 +51,9 @@ The Kagenti Operator discovers, indexes, and secures AI agents deployed in Kuber
 
 ## Deploy an Agent with AgentRuntime (Recommended)
 
-The AgentRuntime approach keeps your workload manifests clean — no kagenti labels required. The controller applies labels, computes a config hash, and triggers the AuthBridge webhook to inject sidecars.
+The AgentRuntime approach requires only a `protocol.kagenti.io/a2a` label on your Deployment — the controller applies `kagenti.io/type`, computes a config hash, and triggers the AuthBridge webhook to inject sidecars. The protocol label tells the AgentCard sync controller which protocol the agent speaks, enabling automatic discovery.
 
-### Step 1: Deploy a Clean Deployment
+### Step 1: Deploy a Deployment with Protocol Label
 
 ```yaml
 kubectl apply -f - <<EOF
@@ -64,6 +64,7 @@ metadata:
   namespace: team1
   labels:
     app.kubernetes.io/name: weather-agent
+    protocol.kagenti.io/a2a: ""
 spec:
   replicas: 1
   selector:
