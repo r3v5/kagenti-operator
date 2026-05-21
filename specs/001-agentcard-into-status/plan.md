@@ -5,7 +5,7 @@
 
 ## Summary
 
-Move A2A agent card discovery into the AgentRuntime controller's reconcile loop so operators can read card data, fetch metadata, and mTLS verification results from a single resource (`status.card` on AgentRuntime). Reuses the existing `agentcard.Fetcher` and `agentcard.AuthenticatedFetcher` interfaces and the `AgentCardData` struct. The feature is gated behind a `--enable-card-discovery` flag (default: disabled). AgentCard CRD remains functional with a deprecation warning.
+Move A2A agent card discovery into the AgentRuntime controller's reconcile loop so operators can read card data, fetch metadata, and mTLS verification results from a single resource (`status.card` on AgentRuntime). Reuses the existing `agentcard.Fetcher` and `agentcard.AuthenticatedFetcher` interfaces and the `AgentCardData` struct. The feature is gated behind a `--enable-card-discovery` flag (default: disabled). AgentCard CRD remains functional with a deprecation warning. Identity binding policy and enforcement actions stay on AgentCard during coexistence (see Out of Scope in spec.md).
 
 ## Technical Context
 
@@ -15,8 +15,8 @@ Move A2A agent card discovery into the AgentRuntime controller's reconcile loop 
 **Testing**: Ginkgo/Gomega (unit + integration), envtest for controller tests, e2e in `test/e2e/`
 **Target Platform**: Kubernetes 1.31+
 **Project Type**: Kubernetes operator (kubebuilder-based)
-**Performance Goals**: Card fetch adds < 1s to reconcile; no periodic re-fetch (event-driven only)
-**Constraints**: No new CRDs; feature-gated; backward compatible with existing AgentCard workflows
+**Performance Goals**: Card fetch adds < 1s to reconcile; 10s timeout on HTTP/mTLS request; no periodic re-fetch (event-driven only)
+**Constraints**: No new CRDs; feature-gated; backward compatible with existing AgentCard workflows; change-detection hash stored as annotation (not in CRD status API surface)
 **Scale/Scope**: Hundreds of AgentRuntimes per cluster (card fetch is 1:1 with AgentRuntime)
 
 ## Constitution Check
@@ -36,6 +36,7 @@ specs/001-agentcard-into-status/
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output
 ├── contracts/           # Phase 1 output (CRD status contract)
+├── REVIEWERS.md         # Review guide for PR
 └── tasks.md             # Phase 2 output (/speckit.tasks)
 ```
 
@@ -66,7 +67,7 @@ kagenti-operator/
     └── integration/                # MODIFY: add card fetch integration tests
 ```
 
-**Structure Decision**: Existing kubebuilder project structure. All changes extend existing files. No new packages or directories needed.
+**Structure Decision**: Existing kubebuilder project structure. All changes extend existing files. No new packages or directories needed. Workload resolution covers Deployment, StatefulSet, and Sandbox (matching existing AgentCard controller patterns).
 
 ## Complexity Tracking
 

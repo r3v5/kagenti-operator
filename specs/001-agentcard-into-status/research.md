@@ -2,20 +2,20 @@
 
 ## R1: Service Endpoint Resolution Strategy
 
-**Decision**: Selector matching. Resolve the Deployment's Pod selector labels, list Services in the same namespace, find the first Service whose selector matches.
+**Decision**: Selector matching. Resolve the workload's Pod selector labels, list Services in the same namespace, find the first Service whose selector matches. Applies to all supported workload types (Deployment, StatefulSet, Sandbox).
 
-**Rationale**: Standard Kubernetes pattern. Works automatically without user annotations. The existing AgentCard controller uses a simpler convention (Service name = workload name via `workload.ServiceName`), but selector matching is more robust for cases where Service and Deployment names diverge.
+**Rationale**: Standard Kubernetes pattern. Works automatically without user annotations. The existing AgentCard controller uses a simpler convention (Service name = workload name via `workload.ServiceName`), but selector matching is more robust for cases where Service and workload names diverge.
 
 **Alternatives considered**:
-- Naming convention (Service name = Deployment name): simpler but brittle when names differ
+- Naming convention (Service name = workload name): simpler but brittle when names differ
 - Annotation-driven: more flexible but adds configuration burden
 - Hybrid (selector match + annotation override): future enhancement if needed
 
-**Implementation note**: The existing `AgentCardReconciler.getWorkload()` sets `ServiceName: targetRef.Name` (line 526 of agentcard_controller.go). For the AgentRuntime controller, we should match this convention initially (use the Deployment name as the Service name) since it aligns with how Services are typically created for agent workloads. If no Service matches by name, fall back to selector matching.
+**Implementation note**: The existing `AgentCardReconciler.getWorkload()` sets `ServiceName: targetRef.Name` (line 526 of agentcard_controller.go). For the AgentRuntime controller, we should match this convention initially (use the workload name as the Service name) since it aligns with how Services are typically created for agent workloads. If no Service matches by name, fall back to selector matching.
 
 ## R2: Card Fetch Trigger Mechanism
 
-**Decision**: Pod template hash change detection. The AgentRuntime controller already watches Deployments and reconciles on changes. The card fetch phase checks whether the Deployment's `pod-template-hash` has changed since the last successful fetch by comparing against a stored hash in `status.card`.
+**Decision**: Pod template hash change detection. The AgentRuntime controller already watches workloads and reconciles on changes. The card fetch phase checks whether the workload's pod-template-hash (or generation for StatefulSets/Sandboxes) has changed since the last successful fetch by comparing against a hash stored in an annotation (`agent.kagenti.dev/last-card-fetch-hash`), not in the CRD status API surface.
 
 **Rationale**: Avoids unnecessary HTTP calls on every reconcile. Pod template hash changes correlate with actual code/config changes that could affect the agent card. The AgentRuntime controller already reconciles on Deployment changes, so no new watches needed.
 
@@ -60,6 +60,8 @@
 - Card payload: embedded `AgentCardData` (name, description, version, url, skills, capabilities, etc.)
 - Fetch metadata: `fetchedAt` (timestamp), `cardId` (SHA-256 content hash), `protocol` (detected agent protocol)
 - Verification: `validSignature` (bool), `signatureKeyID`, `attestedAgentSpiffeID`, `signatureVerificationDetails`
+
+**Note (from review feedback)**: `lastPodTemplateHash` was originally in this struct but moved to an annotation (`agent.kagenti.dev/last-card-fetch-hash`) to avoid coupling the change-detection mechanism to the public API surface.
 
 ## R6: Deprecation Warning Implementation
 

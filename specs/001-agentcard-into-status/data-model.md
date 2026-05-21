@@ -30,7 +30,8 @@ Added to `AgentRuntimeStatus` as an optional field.
 | `signatureKeyID` | string | Key ID from verified JWS header | New field |
 | `signatureVerificationDetails` | string | Verification details/error message | New field |
 | `attestedAgentSpiffeID` | string | SPIFFE ID from mTLS peer certificate | New field |
-| `lastPodTemplateHash` | string | Pod template hash at time of fetch (internal, for change detection) | New field |
+
+**Note**: Change-detection hash (`lastPodTemplateHash`) is stored as an annotation (`agent.kagenti.dev/last-card-fetch-hash`) on the AgentRuntime, not in the CRD status. This keeps the implementation mechanism out of the public API surface.
 
 ### Modified: AgentRuntimeStatus
 
@@ -57,8 +58,9 @@ Added to AgentRuntime `status.conditions[]`.
 | `CardSynced` | True | Card fetched and parsed successfully |
 | `CardFetchFailed` | False | HTTP/mTLS fetch error |
 | `CardParseFailed` | False | JSON parse error |
-| `ServiceNotFound` | False | No Service matches the Deployment selector |
-| `WorkloadNotReady` | False | Deployment has zero ready Pods |
+| `ServiceNotFound` | False | No Service matches the workload's selector |
+| `WorkloadNotReady` | False | Workload has zero ready Pods |
+| `FetchTimeout` | False | Card fetch exceeded 10-second timeout |
 | `CardDiscoveryDisabled` | False | Feature flag is off (clears stale data) |
 | `FetchSkipped` | True | Pod template hash unchanged, card data still valid |
 
