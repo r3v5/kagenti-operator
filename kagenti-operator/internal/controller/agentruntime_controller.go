@@ -643,11 +643,34 @@ func (r *AgentRuntimeReconciler) mapClusterConfigMapToAgentRuntimes(ctx context.
 	return agentRuntimesToRequests(rtList.Items)
 }
 
-// mapNamespaceConfigMapToAgentRuntimes maps changes to namespace-level defaults
-// ConfigMaps (kagenti.io/defaults=true) to AgentRuntimes in the same namespace.
+// mapNamespaceConfigMapToAgentRuntimes maps changes to relevant
+// namespace-scoped ConfigMaps to AgentRuntimes in the same namespace.
+// Two ConfigMap shapes are watched:
+//
+//  1. Namespace defaults — labeled kagenti.io/defaults=true. Folded into
+//     resolvedConfig.Defaults during resolveConfig.
+//  2. authbridge-runtime-config (matched by name, no label required) —
+//     this is the ConfigMap the admission webhook reads at pod creation.
+//     Editing it should trigger a rollout of every AgentRuntime in the
+//     namespace because the per-agent ConfigMap is rebuilt from this
+//     content on every pod admission.
+//
+// Both signals enqueue every AgentRuntime in the namespace; the
+// reconciler's hash check filters out no-op cases (only AgentRuntimes
+// whose computed hash actually changed re-stamp the pod template).
 func (r *AgentRuntimeReconciler) mapNamespaceConfigMapToAgentRuntimes(ctx context.Context, obj client.Object) []reconcile.Request {
 	labels := obj.GetLabels()
-	if labels[LabelNamespaceDefaults] != "true" {
+	// goconst flags this literal as the 11th "true" in the codebase and
+	// suggests reusing AnnotationRestartPendingValue, but that constant
+	// is semantically a restart-pending marker, not a generic label-true
+	// value — reusing it would obscure intent. Existing code (e.g.
+	// defaults_config_reconciler.go) uses the same literal-true idiom
+	// for label checks; rather than introduce a fresh `labelValueTrue`
+	// constant only here, suppress the rule on this one line.
+	isNsDefaults := labels[LabelNamespaceDefaults] == "true" //nolint:goconst
+	isAuthBridgeRuntime := obj.GetName() == AuthBridgeRuntimeConfigMapName
+
+	if !isNsDefaults && !isAuthBridgeRuntime {
 		return nil
 	}
 

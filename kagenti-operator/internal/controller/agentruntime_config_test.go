@@ -257,6 +257,77 @@ var _ = Describe("AgentRuntime Config", func() {
 			r2, _ := ComputeConfigHash(ctx, k8sClient, namespace, spec)
 			Expect(r1.Hash).NotTo(Equal(r2.Hash))
 		})
+
+		It("should change when MTLSMode flips on the CR", func() {
+			// CR-side parallel to the CM-edit test below: spec.mtlsMode
+			// must feed the hash so flipping disabled→strict on a CR
+			// rolls the workload. Without an explicit assertion a
+			// future refactor that drops MTLSMode from resolvedConfig
+			// would silently regress rollout-on-CR-edit.
+			specOff := &agentv1alpha1.AgentRuntimeSpec{
+				Type:      agentv1alpha1.RuntimeTypeAgent,
+				TargetRef: agentv1alpha1.TargetRef{APIVersion: "apps/v1", Kind: "Deployment", Name: "hash-mtls-cr"},
+				MTLSMode:  "disabled",
+			}
+			specOn := &agentv1alpha1.AgentRuntimeSpec{
+				Type:      agentv1alpha1.RuntimeTypeAgent,
+				TargetRef: agentv1alpha1.TargetRef{APIVersion: "apps/v1", Kind: "Deployment", Name: "hash-mtls-cr"},
+				MTLSMode:  "strict",
+			}
+
+			r1, _ := ComputeConfigHash(ctx, k8sClient, namespace, specOff)
+			r2, _ := ComputeConfigHash(ctx, k8sClient, namespace, specOn)
+			Expect(r1.Hash).NotTo(Equal(r2.Hash))
+		})
+
+		It("should change when AuthBridgeMode flips on the CR", func() {
+			// Bonus: AuthBridgeMode rollouts had a pre-existing gap
+			// (not in resolvedConfig) that this PR closed. Lock it.
+			specA := &agentv1alpha1.AgentRuntimeSpec{
+				Type:           agentv1alpha1.RuntimeTypeAgent,
+				TargetRef:      agentv1alpha1.TargetRef{APIVersion: "apps/v1", Kind: "Deployment", Name: "hash-abm-cr"},
+				AuthBridgeMode: "proxy-sidecar",
+			}
+			specB := &agentv1alpha1.AgentRuntimeSpec{
+				Type:           agentv1alpha1.RuntimeTypeAgent,
+				TargetRef:      agentv1alpha1.TargetRef{APIVersion: "apps/v1", Kind: "Deployment", Name: "hash-abm-cr"},
+				AuthBridgeMode: "lite",
+			}
+			r1, _ := ComputeConfigHash(ctx, k8sClient, namespace, specA)
+			r2, _ := ComputeConfigHash(ctx, k8sClient, namespace, specB)
+			Expect(r1.Hash).NotTo(Equal(r2.Hash))
+		})
+
+		It("should change when authbridge-runtime-config edits", func() {
+			// Edits to the namespace authbridge-runtime-config (which the
+			// admission webhook reads at pod creation) must roll
+			// affected workloads. The hash captures its config.yaml
+			// content as a raw string so any byte change registers.
+			abCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      AuthBridgeRuntimeConfigMapName,
+					Namespace: namespace,
+				},
+				Data: map[string]string{
+					"config.yaml": "mode: proxy-sidecar\n",
+				},
+			}
+			Expect(k8sClient.Create(ctx, abCM)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, abCM) }()
+
+			spec := &agentv1alpha1.AgentRuntimeSpec{
+				Type:      agentv1alpha1.RuntimeTypeAgent,
+				TargetRef: agentv1alpha1.TargetRef{APIVersion: "apps/v1", Kind: "Deployment", Name: "hash-abruntime"},
+			}
+
+			r1, _ := ComputeConfigHash(ctx, k8sClient, namespace, spec)
+
+			abCM.Data["config.yaml"] = "mode: proxy-sidecar\nmtls:\n  mode: strict\n"
+			Expect(k8sClient.Update(ctx, abCM)).To(Succeed())
+
+			r2, _ := ComputeConfigHash(ctx, k8sClient, namespace, spec)
+			Expect(r1.Hash).NotTo(Equal(r2.Hash))
+		})
 	})
 
 	Context("ComputeDefaultsOnlyHash", func() {
@@ -548,7 +619,19 @@ var _ = Describe("AgentRuntime Config", func() {
 			requests := r.mapNamespaceConfigMapToAgentRuntimes(ctx, cm)
 			Expect(requests).NotTo(BeEmpty())
 
-			// Should not match ConfigMap without label
+			// Should also match authbridge-runtime-config (matched by name,
+			// no label required). Editing this CM is the operator-facing
+			// way to change mtls / mode / pipeline plugins for the whole
+			// namespace; without this watch the rollout never fires.
+			abCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: AuthBridgeRuntimeConfigMapName, Namespace: namespace,
+				},
+			}
+			Expect(r.mapNamespaceConfigMapToAgentRuntimes(ctx, abCM)).NotTo(BeEmpty())
+
+			// Should not match ConfigMap without label and not named
+			// authbridge-runtime-config (random unrelated CM).
 			noLabel := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: "no-label", Namespace: namespace},
 			}

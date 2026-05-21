@@ -43,6 +43,12 @@ const (
 
 	// LabelNamespaceDefaults identifies namespace-level defaults ConfigMaps.
 	LabelNamespaceDefaults = "kagenti.io/defaults"
+
+	// AuthBridgeRuntimeConfigMapName is the namespace-scoped ConfigMap that
+	// holds the authbridge runtime config (config.yaml). Edits to this
+	// ConfigMap are watched by AgentRuntimeReconciler so the resolved-config
+	// hash picks them up and rolls affected workloads.
+	AuthBridgeRuntimeConfigMapName = "authbridge-runtime-config"
 )
 
 // resolvedConfig is the canonical representation used for hash computation.
@@ -58,6 +64,31 @@ type resolvedConfig struct {
 	Trace        *traceConfig      `json:"trace,omitempty"`
 	FeatureGates map[string]string `json:"featureGates,omitempty"`
 	Defaults     map[string]string `json:"defaults,omitempty"`
+
+	// AuthBridgeMode and MTLSMode change the injected sidecar shape /
+	// transport posture, both of which require a pod restart to take
+	// effect. Including them here folds CR-edit changes into the
+	// config-hash so applyWorkloadConfig stamps a new hash on the pod
+	// template and the Deployment rolls.
+	AuthBridgeMode string `json:"authBridgeMode,omitempty"`
+	MTLSMode       string `json:"mtlsMode,omitempty"`
+
+	// AuthBridgeRuntime captures the namespace authbridge-runtime-config
+	// ConfigMap's config.yaml content so namespace-level edits flow into
+	// the hash. Stored as the raw string (not parsed) because authbridge
+	// pipelines/listener/mtls config drift through here in any shape and
+	// we want any byte change to roll the workload. Empty string when
+	// the ConfigMap doesn't exist in the namespace.
+	//
+	// Operational note: a single edit to authbridge-runtime-config
+	// re-hashes every AgentRuntime in the namespace and reconciles them
+	// in a burst. Kubernetes sequences the actual pod rolls per
+	// Deployment, but the controller's reconcile load scales linearly
+	// with the number of AgentRuntimes. For typical small namespaces
+	// (single-digit agents) this is fine; in larger deployments,
+	// formatting / whitespace edits to this CM during peak hours will
+	// trigger a noticeable rollout fan-out.
+	AuthBridgeRuntime string `json:"authBridgeRuntime,omitempty"`
 }
 
 type traceConfig struct {
@@ -111,9 +142,19 @@ func resolveConfig(ctx context.Context, c client.Reader, namespace string, spec 
 	}
 	merged := mergeMaps(clusterDefaults, nsDefaults)
 
+	// Layer 2b: namespace authbridge-runtime-config (config.yaml).
+	// Captured raw so any byte change rolls the workload. The CM may
+	// not exist in every agent namespace; absence is normal and the
+	// admission webhook falls back to its own defaults.
+	abRuntime := ""
+	if data := readConfigMapData(ctx, c, namespace, AuthBridgeRuntimeConfigMapName); len(data) > 0 {
+		abRuntime = data["config.yaml"]
+	}
+
 	resolved := resolvedConfig{
-		FeatureGates: featureGates,
-		Defaults:     merged,
+		FeatureGates:      featureGates,
+		Defaults:          merged,
+		AuthBridgeRuntime: abRuntime,
 	}
 
 	if spec == nil {
@@ -142,6 +183,9 @@ func resolveConfig(ctx context.Context, c client.Reader, namespace string, spec 
 			resolved.Trace.Rate = spec.Trace.Sampling.Rate
 		}
 	}
+
+	resolved.AuthBridgeMode = spec.AuthBridgeMode
+	resolved.MTLSMode = spec.MTLSMode
 
 	return resolved, warnings
 }
